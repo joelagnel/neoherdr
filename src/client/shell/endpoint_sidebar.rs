@@ -134,19 +134,25 @@ pub(super) fn render_collapsed(
             let selected = state.selected_workspace_id.is_some_and(|target| {
                 target.matches(&endpoint.endpoint_id, &workspace.workspace_id)
             });
-            let selection_background = if palette.selection_bg == ratatui::style::Color::Reset {
-                palette.active_row_bg
-            } else {
-                palette.selection_bg
-            };
+            let selection_background = super::mobile::accent_tint(palette, true).unwrap_or(
+                if palette.selection_bg == ratatui::style::Color::Reset {
+                    palette.active_row_bg
+                } else {
+                    palette.selection_bg
+                },
+            );
             if selected {
                 buffer.set_style(rect, Style::default().bg(selection_background));
             } else if focused {
                 buffer.set_style(
                     rect,
-                    Style::default().bg(super::sidebar::workspace_active_background(
-                        palette,
-                        state.selected_workspace_id.is_some(),
+                    Style::default().bg(super::mobile::accent_tint(palette, false).unwrap_or_else(
+                        || {
+                            super::sidebar::workspace_active_background(
+                                palette,
+                                state.selected_workspace_id.is_some(),
+                            )
+                        },
                     )),
                 );
             }
@@ -253,6 +259,14 @@ pub(super) fn render_expanded(
             .fg(palette.overlay0)
             .add_modifier(Modifier::BOLD),
     );
+    put_text(
+        buffer,
+        workspace_area.x,
+        workspace_area.y + 1,
+        workspace_area.width,
+        &"─".repeat(workspace_area.width as usize),
+        Style::default().fg(palette.overlay0),
+    );
     if config.mouse_capture {
         super::sidebar::render_header_buttons(
             buffer,
@@ -316,6 +330,7 @@ pub(super) fn render_expanded(
                         let workspace = snapshot.workspaces.get(entry.index)?;
                         Some(
                             super::sidebar::workspace_rows(
+                                snapshot,
                                 workspace,
                                 super::sidebar::displayed_workspace_status(
                                     snapshot,
@@ -448,6 +463,7 @@ pub(super) fn render_expanded(
                     collapsed_groups,
                 );
                 let tokens = super::sidebar::workspace_rows(
+                    snapshot,
                     workspace,
                     status,
                     entry.indented,
@@ -475,10 +491,14 @@ pub(super) fn render_expanded(
                     config.status_indicators,
                     entry,
                     tokens,
-                    endpoint_active && workspace.focused,
-                    selected,
-                    state.selected_workspace_id.is_some(),
-                    false,
+                    super::sidebar::WorkspaceRowState {
+                        focused: endpoint_active && workspace.focused,
+                        selected,
+                        navigating: state.selected_workspace_id.is_some(),
+                        dragged: false,
+                        index: row_index,
+                    },
+                    super::sidebar::workspace_tab_position(snapshot, workspace).as_deref(),
                     palette,
                 );
                 if endpoint.status != ClientEndpointStatus::Online {

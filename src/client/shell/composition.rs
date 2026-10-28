@@ -186,6 +186,12 @@ impl ClientShellState {
             return None;
         }
         let layout = self.layout(cols, rows);
+        if layout.mobile_header.is_empty()
+            || self.mode != ClientShellMode::Terminal
+            || self.overlay.is_some()
+        {
+            self.mobile_menu_open = false;
+        }
         if self.last_tab_bar_width != Some(layout.tab_bar.width) {
             self.last_tab_bar_width = Some(layout.tab_bar.width);
             self.reveal_focused_tab = true;
@@ -641,6 +647,18 @@ impl ClientShellState {
         restore_mode_bar(&mut frame, mode_bar, mode_bar_cells.as_deref());
         if let Some(bar) = mode_bar {
             occlusion.cover(bar);
+        }
+        if self.mobile_menu_open {
+            let cursor = frame.cursor.clone();
+            let mut composed = frame.to_ratatui_buffer()?;
+            super::mobile::render_mobile_menu(
+                &mut composed,
+                layout.pane_surface,
+                &self.config,
+                &mut self.hits,
+            );
+            occlusion.cover(self.hits.mobile_menu_panel);
+            frame.replace_from_ratatui_buffer_preserving_effects(&composed, cursor);
         }
         if let Some(overlay) = self.overlay.as_ref() {
             let mut composed = frame.to_ratatui_buffer()?;

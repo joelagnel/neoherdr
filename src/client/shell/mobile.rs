@@ -10,9 +10,22 @@ use super::render::{display_width, put_segment, put_text};
 use super::*;
 
 const MOBILE_BUTTON_WIDTH: u16 = 10;
-const MOBILE_FIND_WIDTH: u16 = 8;
-const MOBILE_MIN_STATUS_WIDTH: u16 = 12;
+const MOBILE_MENU_WIDTH: u16 = 8;
+const MOBILE_MENU_BUTTON_HEIGHT: u16 = 2;
+const MOBILE_NEW_BUTTON_WIDTH: u16 = 8;
 const MOBILE_SWITCHER_TITLE_WIDTH: u16 = 8;
+const MOBILE_FIND_WIDTH: u16 = 8;
+
+#[derive(Clone, Copy)]
+enum MobileMenuAction {
+    Find,
+    Switch,
+}
+
+const MOBILE_MENU_ACTIONS: [(&str, MobileMenuAction); 2] = [
+    ("Find", MobileMenuAction::Find),
+    ("switch", MobileMenuAction::Switch),
+];
 
 struct MobileItem {
     lines: Vec<Line<'static>>,
@@ -29,6 +42,48 @@ impl MobileItem {
                     .fg(palette.overlay1)
                     .bg(palette.panel_bg)
                     .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
+            ))],
+            background: palette.panel_bg,
+            target: None,
+        }
+    }
+
+    /// A section title (not underlined, with an optional right-aligned action
+    /// button) followed by a full-width rule.
+    fn ruled_section(
+        label: impl Into<String>,
+        width: u16,
+        action: Option<(&'static str, ClientMobileTarget)>,
+        palette: &Palette,
+    ) -> [Self; 2] {
+        let title_style = Style::default()
+            .fg(palette.overlay1)
+            .bg(palette.panel_bg)
+            .add_modifier(Modifier::BOLD);
+        let (right, target) = action.map_or(("", None), |(text, target)| (text, Some(target)));
+        let title = Self {
+            lines: vec![row_line(
+                vec![Span::styled(format!(" {} ", label.into()), title_style)],
+                right,
+                Style::default()
+                    .fg(palette.accent)
+                    .bg(palette.panel_bg)
+                    .add_modifier(Modifier::BOLD),
+                usize::from(width),
+                palette.panel_bg,
+            )],
+            background: palette.panel_bg,
+            target,
+        };
+        [title, Self::rule(width, palette)]
+    }
+
+    /// A full-width horizontal rule.
+    fn rule(width: u16, palette: &Palette) -> Self {
+        Self {
+            lines: vec![Line::from(Span::styled(
+                "─".repeat(usize::from(width)),
+                Style::default().fg(palette.overlay0).bg(palette.panel_bg),
             ))],
             background: palette.panel_bg,
             target: None,
@@ -62,26 +117,18 @@ pub(super) fn render_mobile_header(
     }
     let palette = &config.palette;
     buffer.set_style(area, Style::default().bg(palette.panel_bg));
-    let button_width = MOBILE_BUTTON_WIDTH.min(area.width);
+    let button_width = MOBILE_MENU_WIDTH.min(area.width);
     let button = Rect::new(
         area.right().saturating_sub(button_width),
         area.y,
         button_width,
         area.height,
     );
-    hits.mobile_switch = button;
-    let mut left = button.x;
-    let find =
-        (left.saturating_sub(area.x) >= MOBILE_FIND_WIDTH + MOBILE_MIN_STATUS_WIDTH).then(|| {
-            left -= MOBILE_FIND_WIDTH;
-            Rect::new(left, area.y, MOBILE_FIND_WIDTH, area.height)
-        });
-    hits.mobile_find = find.unwrap_or_default();
-    let status_width = left.saturating_sub(area.x).saturating_sub(1);
+    hits.mobile_menu = button;
+    let status_width = button.x.saturating_sub(area.x).saturating_sub(1);
     let status = Rect::new(area.x, area.y, status_width, area.height);
     render_header_status(buffer, status, snapshot, config);
-    render_header_button(buffer, find.unwrap_or_default(), "Find", palette);
-    render_header_button(buffer, button, "switch", palette);
+    render_header_button(buffer, button, "menu", palette);
     if snapshot
         .agents
         .iter()
@@ -98,6 +145,53 @@ pub(super) fn render_mobile_header(
             ),
             Style::default().fg(palette.red).bg(palette.surface0),
         );
+    }
+}
+
+/// The menu panel under the header: equal-sized buttons, two rows tall like the header
+/// buttons, wrapping into further bands when the screen is too narrow for one band.
+pub(super) fn render_mobile_menu(
+    buffer: &mut Buffer,
+    area: Rect,
+    config: &ClientShellConfig,
+    hits: &mut ShellHitMap,
+) {
+    if area.is_empty() {
+        return;
+    }
+    let palette = &config.palette;
+    if !hits.mobile_menu.is_empty() {
+        buffer.set_style(hits.mobile_menu, Style::default().bg(palette.surface1));
+    }
+    let per_band = (area.width / MOBILE_BUTTON_WIDTH).max(1);
+    let button_width = MOBILE_BUTTON_WIDTH.min(area.width);
+    let bands = (MOBILE_MENU_ACTIONS.len() as u16).div_ceil(per_band);
+    let panel = Rect::new(
+        area.x,
+        area.y,
+        area.width,
+        (bands * MOBILE_MENU_BUTTON_HEIGHT).min(area.height),
+    );
+    Clear.render(panel, buffer);
+    buffer.set_style(panel, Style::default().bg(palette.panel_bg));
+    hits.mobile_menu_panel = panel;
+    for (index, (label, action)) in MOBILE_MENU_ACTIONS.into_iter().enumerate() {
+        let index = index as u16;
+        let rect = Rect::new(
+            area.x + (index % per_band) * button_width,
+            area.y + (index / per_band) * MOBILE_MENU_BUTTON_HEIGHT,
+            button_width,
+            MOBILE_MENU_BUTTON_HEIGHT,
+        )
+        .intersection(panel);
+        if rect.is_empty() {
+            continue;
+        }
+        render_header_button(buffer, rect, label, palette);
+        match action {
+            MobileMenuAction::Find => hits.mobile_find = rect,
+            MobileMenuAction::Switch => hits.mobile_switch = rect,
+        }
     }
 }
 
@@ -127,7 +221,7 @@ fn render_header_status(
         );
         return;
     };
-    let tab_status = compact_tab_status(snapshot, workspace);
+    let tab_status = format!("tab {}", compact_tab_status(snapshot, workspace));
     let tab_width = display_width(&tab_status).saturating_add(1).min(area.width);
     let name_width = area.width.saturating_sub(tab_width);
     put_text(
@@ -206,6 +300,112 @@ fn render_header_button(buffer: &mut Buffer, area: Rect, label: &str, palette: &
     );
 }
 
+/// `to_percent`% of the way from `base` to `to`, when both are RGB colors.
+fn blend(base: Color, to: Color, to_percent: u16) -> Option<Color> {
+    let (Color::Rgb(r1, g1, b1), Color::Rgb(r2, g2, b2)) = (base, to) else {
+        return None;
+    };
+    let mix = |from: u8, to: u8| {
+        ((u16::from(from) * (100 - to_percent) + u16::from(to) * to_percent) / 100) as u8
+    };
+    Some(Color::Rgb(mix(r1, r2), mix(g1, g2), mix(b1, b2)))
+}
+
+/// Two distinct dark shades that alternate down a list, so rows read as
+/// separate without rules or blank lines. `None` for palettes without RGB
+/// colors (terminal themes), which are not striped.
+pub(in crate::client::shell) fn try_row_shade(palette: &Palette, row: usize) -> Option<Color> {
+    let percent = if row.is_multiple_of(2) { 10 } else { 45 };
+    blend(palette.panel_bg, palette.surface0, percent)
+}
+
+pub(in crate::client::shell) fn row_shade(palette: &Palette, row: usize) -> Color {
+    try_row_shade(palette, row).unwrap_or(palette.panel_bg)
+}
+
+/// The accent-tinted background of the highlighted row: a dark, clearly blue version of the
+/// accent hue, so it reads as a different color (not another gray shade or black) without washing
+/// out the dim text on it. Stronger for the navigation cursor. `None` without RGB colors.
+pub(in crate::client::shell) fn accent_tint(palette: &Palette, cursor: bool) -> Option<Color> {
+    let Color::Rgb(r, g, b) = palette.panel_bg else {
+        return None;
+    };
+    let dark = Color::Rgb(
+        (u16::from(r) * 35 / 100) as u8,
+        (u16::from(g) * 35 / 100) as u8,
+        (u16::from(b) * 35 / 100) as u8,
+    );
+    blend(dark, palette.accent, if cursor { 30 } else { 20 })
+}
+
+/// The highlighted row's background. Palettes without RGB colors (terminal themes)
+/// keep their own highlight colors.
+pub(in crate::client::shell) fn highlight_background(
+    palette: &Palette,
+    cursor: bool,
+    navigating: bool,
+) -> Color {
+    accent_tint(palette, cursor).unwrap_or_else(|| {
+        let reset = palette.surface0 == Color::Reset;
+        if cursor {
+            if reset {
+                palette.active_row_bg
+            } else {
+                palette.surface0
+            }
+        } else if navigating && reset {
+            palette.panel_bg
+        } else {
+            palette.surface_dim
+        }
+    })
+}
+
+/// A row's first line: `left` spans, then `right` pushed to the edge of `width`.
+fn row_line(
+    mut left: Vec<Span<'static>>,
+    right: &str,
+    right_style: Style,
+    width: usize,
+    background: Color,
+) -> Line<'static> {
+    let used = left
+        .iter()
+        .map(|span| display_width(span.content.as_ref()) as usize)
+        .sum::<usize>();
+    let right_width = display_width(right) as usize;
+    if right_width > 0 && used + right_width < width {
+        left.push(Span::styled(
+            " ".repeat(width - used - right_width),
+            Style::default().bg(background),
+        ));
+        left.push(Span::styled(right.to_owned(), right_style));
+    }
+    Line::from(left)
+}
+
+/// The workspace's active tab name and its "N/M" position among its tabs.
+fn workspace_active_tab(
+    snapshot: &ClientShellSnapshot,
+    workspace: &ClientShellWorkspace,
+) -> (Option<String>, Option<String>) {
+    let tabs = snapshot
+        .tabs
+        .iter()
+        .filter(|tab| tab.workspace_id == workspace.workspace_id)
+        .collect::<Vec<_>>();
+    match tabs
+        .iter()
+        .position(|tab| tab.tab_id == workspace.active_tab_id)
+    {
+        Some(active) => (
+            Some(tabs[active].label.clone()),
+            Some(format!("{}/{}", active + 1, tabs.len())),
+        ),
+        None => (None, None),
+    }
+}
+
 fn mobile_endpoint_state(status: ClientEndpointStatus) -> &'static str {
     match status {
         ClientEndpointStatus::Connecting => "connecting",
@@ -231,9 +431,9 @@ fn compact_tab_status(snapshot: &ClientShellSnapshot, workspace: &ClientShellWor
         .map(|tab| tab.label.as_str())
         .unwrap_or("1");
     if tabs.len() <= 1 {
-        format!("tab {label}")
+        label.to_owned()
     } else {
-        format!("tab {label} · {}/{}", active + 1, tabs.len())
+        format!("{label} · {}/{}", active + 1, tabs.len())
     }
 }
 
@@ -436,9 +636,7 @@ pub(super) fn render_mobile_switcher(
         rule_y,
         area.width,
         &"─".repeat(usize::from(area.width)),
-        Style::default()
-            .fg(palette.surface_dim)
-            .bg(palette.panel_bg),
+        Style::default().fg(palette.overlay0).bg(palette.panel_bg),
     );
     let viewport = Rect::new(
         area.x,
@@ -532,6 +730,13 @@ pub(super) fn render_mobile_switcher(
                 );
             }
             if let Some(target) = item.target {
+                // NewWorkspace is the "+ new" button on the spaces title, not the whole row.
+                let rect = if target == ClientMobileTarget::NewWorkspace {
+                    let width = MOBILE_NEW_BUTTON_WIDTH.min(rect.width);
+                    Rect::new(rect.right() - width, rect.y, width, rect.height)
+                } else {
+                    rect
+                };
                 hits.mobile_targets.push((rect, target));
             }
         }
@@ -625,6 +830,13 @@ fn mobile_items(
             });
         }
     }
+    let multi_machine = endpoints.len() > 1;
+    let machine_title = endpoints
+        .iter()
+        .find(|endpoint| &endpoint.endpoint_id == active_endpoint_id)
+        .or(endpoints.first())
+        .map_or("Local", |endpoint| endpoint.label.as_str());
+    let width = usize::from(content_width);
     let agents_start = items.len();
     let agents = super::aggregate_navigation::aggregate_agent_rows(
         endpoints,
@@ -633,10 +845,19 @@ fn mobile_items(
     );
     let agent_view_label = snapshot.agent_view_label.as_deref();
     if !agents.is_empty() || agent_view_label.is_some() {
-        let title = agent_view_label
-            .map(|label| format!("agents · {label}"))
-            .unwrap_or_else(|| "agents".to_owned());
-        items.push(MobileItem::section(title, palette));
+        let title = match agent_view_label {
+            Some(label) => format!("agents · {label}"),
+            None if multi_machine => "agents".to_owned(),
+            None => format!("agents · {machine_title}"),
+        };
+        // A rule above the title keeps it from sitting against the last space row.
+        items.push(MobileItem::rule(content_width, palette));
+        items.extend(MobileItem::ruled_section(
+            title,
+            content_width,
+            None,
+            palette,
+        ));
         if agents.is_empty() {
             items.push(MobileItem {
                 lines: vec![Line::from(Span::styled(
@@ -650,7 +871,7 @@ fn mobile_items(
                 target: None,
             });
         }
-        for row in agents {
+        for (agent_row, row) in agents.into_iter().enumerate() {
             let endpoint = row.endpoint;
             let agent = row.agent;
             let workspace = endpoint
@@ -672,87 +893,101 @@ fn mobile_items(
             let primary = workspace
                 .map(|workspace| workspace.label.as_str())
                 .unwrap_or(agent_label);
-            let mut detail = Vec::new();
+            let name = if multi_machine {
+                format!("{} · {primary}", endpoint.label)
+            } else {
+                primary.to_owned()
+            };
             let workspace_tab_count = endpoint
                 .snapshot
                 .tabs
                 .iter()
                 .filter(|candidate| candidate.workspace_id == agent.workspace_id)
                 .count();
-            if let Some(tab) = tab.filter(|tab| tab.custom_label || workspace_tab_count > 1) {
-                detail.push(tab.label.clone());
-            }
+            let tab_label = tab
+                .filter(|tab| tab.custom_label || workspace_tab_count > 1)
+                .map(|tab| tab.label.clone());
             let status_key = status_text(agent.agent_status);
-            detail.push(
-                agent
-                    .state_labels
-                    .iter()
-                    .find(|(key, _)| key == status_key)
-                    .map(|(_, label)| label.clone())
-                    .unwrap_or_else(|| {
-                        if agent.agent_status == crate::api::schema::AgentStatus::Unknown {
-                            "idle".to_owned()
-                        } else {
-                            status_key.to_owned()
-                        }
-                    }),
-            );
-            detail.push(agent_label.to_owned());
-            if endpoint.stale() {
-                detail.push(mobile_endpoint_state(endpoint.status).to_owned());
-            }
+            let state_label = agent
+                .state_labels
+                .iter()
+                .find(|(key, _)| key == status_key)
+                .map(|(_, label)| label.clone())
+                .unwrap_or_else(|| {
+                    if agent.agent_status == crate::api::schema::AgentStatus::Unknown {
+                        "idle".to_owned()
+                    } else {
+                        status_key.to_owned()
+                    }
+                });
+            let stale = endpoint.stale();
             let background = if endpoint.endpoint_id == active_endpoint_id && agent.focused {
-                palette.surface_dim
+                highlight_background(palette, false, false)
             } else {
-                palette.panel_bg
+                row_shade(palette, agent_row)
             };
-            let foreground = if endpoint.stale() {
+            let foreground = if stale {
                 palette.overlay0
             } else {
                 palette.text
             };
-            let dim = if endpoint.stale() {
+            let dim = if stale {
                 Modifier::DIM
             } else {
                 Modifier::empty()
             };
+            let muted = Style::default()
+                .fg(palette.overlay0)
+                .bg(background)
+                .add_modifier(dim);
+            let name_budget = width.saturating_sub(5 + display_width(&state_label) as usize + 1);
+            let mut detail = Vec::new();
+            if let Some(tab_label) = &tab_label {
+                detail.push(Span::styled(tab_label.clone(), muted.fg(palette.subtext0)));
+                detail.push(Span::styled(" · ", muted));
+            }
+            detail.push(Span::styled(agent_label.to_owned(), muted));
+            if stale {
+                detail.push(Span::styled(
+                    format!(" · {}", mobile_endpoint_state(endpoint.status)),
+                    muted,
+                ));
+            }
             items.push(MobileItem {
                 lines: vec![
-                    Line::from(vec![
-                        Span::styled("  ", Style::default().bg(background)),
-                        Span::styled(
-                            status_icon(agent.agent_status, config.status_indicators),
-                            Style::default()
-                                .fg(if endpoint.stale() {
-                                    palette.overlay0
-                                } else {
-                                    status_color(agent.agent_status, palette)
-                                })
-                                .bg(background)
-                                .add_modifier(dim),
-                        ),
-                        Span::styled(" ", Style::default().bg(background)),
-                        Span::styled(
-                            crate::ui::truncate_end(
-                                &format!("{} · {primary}", endpoint.label),
-                                usize::from(content_width.saturating_sub(5)),
+                    row_line(
+                        vec![
+                            Span::styled("  ", Style::default().bg(background)),
+                            Span::styled(
+                                status_icon(agent.agent_status, config.status_indicators),
+                                Style::default()
+                                    .fg(if stale {
+                                        palette.overlay0
+                                    } else {
+                                        status_color(agent.agent_status, palette)
+                                    })
+                                    .bg(background)
+                                    .add_modifier(dim),
                             ),
-                            Style::default()
-                                .fg(foreground)
-                                .bg(background)
-                                .add_modifier(Modifier::BOLD | dim),
-                        ),
-                    ]),
-                    Line::from(Span::styled(
-                        crate::ui::truncate_end(
-                            &format!("  {}", detail.join(" · ")),
-                            usize::from(content_width),
-                        ),
-                        Style::default()
-                            .fg(palette.overlay0)
-                            .bg(background)
-                            .add_modifier(dim),
-                    )),
+                            Span::styled(" ", Style::default().bg(background)),
+                            Span::styled(
+                                crate::ui::truncate_end(&name, name_budget),
+                                Style::default()
+                                    .fg(foreground)
+                                    .bg(background)
+                                    .add_modifier(Modifier::BOLD | dim),
+                            ),
+                        ],
+                        &state_label,
+                        muted,
+                        width,
+                        background,
+                    ),
+                    Line::from(
+                        std::iter::once(Span::styled("  ", muted))
+                            .chain(detail)
+                            .collect::<Vec<_>>(),
+                    ),
                 ],
                 background,
                 target: Some(ClientMobileTarget::Agent {
@@ -764,12 +999,17 @@ fn mobile_items(
     }
 
     let spaces_start = items.len();
-    items.push(MobileItem::section("spaces", palette));
-    items.push(MobileItem::action(
-        "  + new workspace",
-        ClientMobileTarget::NewWorkspace,
+    items.extend(MobileItem::ruled_section(
+        if multi_machine {
+            "spaces".to_owned()
+        } else {
+            format!("spaces · {machine_title}")
+        },
+        content_width,
+        Some(("+ new ", ClientMobileTarget::NewWorkspace)),
         palette,
     ));
+    let mut space_row = 0usize;
     for endpoint in super::aggregate_navigation::cached_endpoint_snapshots(endpoints) {
         for entry in super::render::workspace_entries(endpoint.snapshot, &HashSet::new()) {
             let Some(workspace) = endpoint.snapshot.workspaces.get(entry.index) else {
@@ -778,23 +1018,15 @@ fn mobile_items(
             let selected = selected_workspace_id.is_some_and(|target| {
                 target.matches(endpoint.endpoint_id, &workspace.workspace_id)
             });
+            let focused_here = endpoint.endpoint_id == active_endpoint_id && workspace.focused;
             let background = if selected {
-                if palette.surface0 == ratatui::style::Color::Reset {
-                    palette.active_row_bg
-                } else {
-                    palette.surface0
-                }
-            } else if endpoint.endpoint_id == active_endpoint_id && workspace.focused {
-                if selected_workspace_id.is_some()
-                    && palette.surface0 == ratatui::style::Color::Reset
-                {
-                    palette.panel_bg
-                } else {
-                    palette.surface_dim
-                }
+                highlight_background(palette, true, selected_workspace_id.is_some())
+            } else if focused_here {
+                highlight_background(palette, false, selected_workspace_id.is_some())
             } else {
-                palette.panel_bg
+                row_shade(palette, space_row)
             };
+            space_row += 1;
             let connector = if entry.indented {
                 if entry.last_child {
                     "└─ "
@@ -804,7 +1036,7 @@ fn mobile_items(
             } else {
                 ""
             };
-            let name = if entry.indented && !workspace.custom_label {
+            let label = if entry.indented && !workspace.custom_label {
                 workspace
                     .branch
                     .as_deref()
@@ -813,7 +1045,11 @@ fn mobile_items(
             } else {
                 &workspace.label
             };
-            let branch = workspace.branch.as_deref().unwrap_or("shell");
+            let name = if multi_machine {
+                format!("{} · {label}", endpoint.label)
+            } else {
+                label.to_owned()
+            };
             let detail_prefix = if entry.indented {
                 if entry.last_child {
                     "       "
@@ -823,69 +1059,85 @@ fn mobile_items(
             } else {
                 "  "
             };
-            let dim = if endpoint.stale() {
+            let stale = endpoint.stale();
+            let dim = if stale {
                 Modifier::DIM
             } else {
                 Modifier::empty()
             };
-            let foreground = if endpoint.stale() {
+            let foreground = if stale {
                 palette.overlay0
             } else {
                 palette.text
             };
-            let status = if endpoint.stale() {
+            let status = if stale {
                 palette.overlay0
             } else {
                 status_color(workspace.agent_status, palette)
             };
-            let stale_detail = if endpoint.stale() {
-                format!(" · {}", mobile_endpoint_state(endpoint.status))
-            } else {
-                String::new()
-            };
+            let muted = Style::default()
+                .fg(palette.overlay0)
+                .bg(background)
+                .add_modifier(dim);
+            let (tab_name, position) = workspace_active_tab(endpoint.snapshot, workspace);
+            let marker = "  ";
+            let name_budget = width.saturating_sub(
+                marker.chars().count()
+                    + connector.chars().count()
+                    + 2
+                    + position
+                        .as_deref()
+                        .map_or(0, |text| text.chars().count() + 1),
+            );
+            let mut detail = vec![Span::styled(detail_prefix, muted)];
+            if let Some(tab_name) = &tab_name {
+                detail.push(Span::styled(tab_name.clone(), muted.fg(palette.subtext0)));
+            }
+            if let Some(branch) = workspace.branch.as_deref() {
+                let used = detail_prefix.chars().count()
+                    + tab_name.as_deref().map_or(0, |tab| tab.chars().count() + 3);
+                let budget = width.saturating_sub(used);
+                if tab_name.is_some() {
+                    detail.push(Span::styled(" → ", muted));
+                }
+                detail.push(Span::styled(crate::ui::truncate_end(branch, budget), muted));
+            }
+            if stale {
+                detail.push(Span::styled(
+                    format!(" · {}", mobile_endpoint_state(endpoint.status)),
+                    muted,
+                ));
+            }
             items.push(MobileItem {
                 lines: vec![
-                    Line::from(vec![
-                        Span::styled(
-                            format!("  {connector}"),
-                            Style::default()
-                                .fg(palette.overlay0)
-                                .bg(background)
-                                .add_modifier(dim),
-                        ),
-                        Span::styled(
-                            status_icon(workspace.agent_status, config.status_indicators),
-                            Style::default().fg(status).bg(background).add_modifier(dim),
-                        ),
-                        Span::styled(" ", Style::default().bg(background)),
-                        Span::styled(
-                            crate::ui::truncate_end(
-                                &format!("{} · {name}", endpoint.label),
-                                usize::from(content_width.saturating_sub(if entry.indented {
-                                    8
-                                } else {
-                                    5
-                                })),
+                    row_line(
+                        vec![
+                            Span::styled(
+                                format!("{marker}{connector}"),
+                                Style::default()
+                                    .fg(palette.overlay0)
+                                    .bg(background)
+                                    .add_modifier(dim),
                             ),
-                            Style::default()
-                                .fg(foreground)
-                                .bg(background)
-                                .add_modifier(Modifier::BOLD | dim),
-                        ),
-                    ]),
-                    Line::from(Span::styled(
-                        crate::ui::truncate_end(
-                            &format!(
-                                "{detail_prefix}{branch} · {}{stale_detail}",
-                                compact_tab_status(endpoint.snapshot, workspace)
+                            Span::styled(
+                                status_icon(workspace.agent_status, config.status_indicators),
+                                Style::default().fg(status).bg(background).add_modifier(dim),
                             ),
-                            usize::from(content_width),
-                        ),
-                        Style::default()
-                            .fg(palette.overlay0)
-                            .bg(background)
-                            .add_modifier(dim),
-                    )),
+                            Span::styled(" ", Style::default().bg(background)),
+                            Span::styled(
+                                crate::ui::truncate_end(&name, name_budget),
+                                Style::default()
+                                    .fg(foreground)
+                                    .bg(background)
+                                    .add_modifier(Modifier::BOLD | dim),
+                            ),
+                        ],
+                        position.as_deref().unwrap_or(""),
+                        muted,
+                        width,
+                        background,
+                    ),
+                    Line::from(detail),
                 ],
                 background,
                 target: Some(ClientMobileTarget::Workspace {
@@ -920,7 +1172,7 @@ fn mobile_items(
             let label = if tab.custom_label {
                 format!("{} · {}", index + 1, tab.label)
             } else {
-                format!("tab {}", tab.label)
+                tab.label.clone()
             };
             let label = format!(
                 "  {}",
@@ -930,7 +1182,7 @@ fn mobile_items(
                 lines: vec![Line::from(Span::styled(
                     label,
                     Style::default()
-                        .fg(palette.text)
+                        .fg(palette.subtext0)
                         .bg(background)
                         .add_modifier(Modifier::BOLD),
                 ))],
@@ -982,17 +1234,23 @@ impl ClientShellState {
             {
                 return false;
             }
-            if super::contains(self.hits.mobile_switch, point) {
-                self.mobile_switcher_scroll = 0;
-                self.reveal_mobile_workspace = false;
-                self.pending_workspace_highlight = None;
-                self.mode = ClientShellMode::Navigate;
-                self.navigate_workspace_id = self.focused_navigation_target();
+            if self.mobile_menu_open {
+                // The next tap decides: a menu button runs, anything else only closes the menu.
+                self.mobile_menu_open = false;
                 outcome.repaint = true;
+                if super::contains(self.hits.mobile_switch, point) {
+                    self.mobile_switcher_scroll = 0;
+                    self.reveal_mobile_workspace = false;
+                    self.pending_workspace_highlight = None;
+                    self.mode = ClientShellMode::Navigate;
+                    self.navigate_workspace_id = self.focused_navigation_target();
+                } else if super::contains(self.hits.mobile_find, point) {
+                    self.open_search_overlay();
+                }
                 return true;
             }
-            if super::contains(self.hits.mobile_find, point) {
-                self.open_search_overlay();
+            if super::contains(self.hits.mobile_menu, point) {
+                self.mobile_menu_open = true;
                 outcome.repaint = true;
                 return true;
             }

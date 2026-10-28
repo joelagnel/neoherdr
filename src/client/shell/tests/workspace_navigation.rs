@@ -175,29 +175,34 @@ fn navigation_highlights_only_the_preview_and_activates_on_enter() {
                 let focused = workspace_rect(&state, &ClientEndpointId::Local, "ws_1");
                 let palette = &state.config.palette;
                 let color = if cols == 44 {
-                    palette.surface0
+                    crate::client::shell::mobile::highlight_background(palette, true, true)
                 } else {
-                    palette.selection_bg
+                    crate::client::shell::mobile::accent_tint(palette, true).unwrap_or(
+                        if palette.selection_bg == ratatui::style::Color::Reset {
+                            palette.active_row_bg
+                        } else {
+                            palette.selection_bg
+                        },
+                    )
                 };
-                let color = if color == ratatui::style::Color::Reset {
-                    palette.active_row_bg
-                } else {
-                    color
-                };
-                assert_eq!(buffer[(selected.x + 2, selected.y)].bg, color);
+                assert_eq!(
+                    buffer[(selected.x + 2, selected.y)].bg,
+                    color,
+                    "cols={cols} terminal_theme={terminal_theme} endpoint={endpoint:?}"
+                );
                 assert_ne!(buffer[(other.x + 2, other.y)].bg, color);
                 assert_eq!(
                     buffer[(focused.x + 2, focused.y)].bg,
-                    if terminal_theme {
-                        if cols == 44 {
-                            palette.panel_bg
-                        } else {
-                            palette.sidebar_bg
-                        }
-                    } else if cols == 44 {
-                        palette.surface_dim
+                    if cols == 44 {
+                        crate::client::shell::mobile::highlight_background(palette, false, true)
                     } else {
-                        palette.active_row_bg
+                        crate::client::shell::mobile::accent_tint(palette, false).unwrap_or(
+                            if terminal_theme {
+                                palette.sidebar_bg
+                            } else {
+                                palette.active_row_bg
+                            },
+                        )
                     }
                 );
             }

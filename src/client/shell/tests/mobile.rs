@@ -169,7 +169,7 @@ fn mobile_shell_controls_remain_clickable_when_pane_mouse_capture_is_disabled() 
     let mut state = ClientShellState::new(config);
     state.set_snapshot(Box::new(snapshot()));
     state.set_pane_surface(surface());
-    state.compose(44, 20).expect("mobile header");
+    open_mobile_menu(&mut state, 44, 20);
     assert!(!state.hits.mobile_switch.is_empty());
     let switch = state.hits.mobile_switch;
     state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
@@ -218,12 +218,11 @@ fn mobile_header_and_switcher_render_released_sections_and_stable_targets() {
         .iter()
         .map(|cell| cell.symbol.as_str())
         .collect::<String>();
-    // Find shares the header with the status, so the workspace name is truncated here.
-    assert!(header_text.contains("clie"));
+    assert!(header_text.contains("client-shell"));
     assert!(header_text.contains("tab 1"));
     assert!(header_text.contains("blocked"));
-    assert!(header_text.contains("switch"));
-    assert_eq!(state.hits.mobile_switch, Rect::new(34, 0, 10, 2));
+    assert!(header_text.contains("menu"));
+    assert_eq!(state.hits.mobile_menu, Rect::new(36, 0, 8, 2));
 
     let click = |rect: Rect| {
         RawInputEvent::Mouse(crossterm::event::MouseEvent {
@@ -233,10 +232,11 @@ fn mobile_header_and_switcher_render_released_sections_and_stable_targets() {
             modifiers: KeyModifiers::empty(),
         })
     };
+    open_mobile_menu(&mut state, 44, 20);
     let opened = state.handle_raw_events(vec![click(state.hits.mobile_switch)]);
     assert!(opened.repaint);
     assert_eq!(state.mode, ClientShellMode::Navigate);
-    let switcher = state.compose(44, 20).expect("mobile switcher");
+    let switcher = state.compose(44, 34).expect("mobile switcher");
     let switcher_text = switcher
         .cells
         .chunks(switcher.width as usize)
@@ -256,7 +256,7 @@ fn mobile_header_and_switcher_render_released_sections_and_stable_targets() {
         "close",
         "agents",
         "spaces",
-        "+ new workspace",
+        "+ new",
         "tabs",
         "+ new tab",
         "menu",
@@ -290,7 +290,7 @@ fn mobile_header_and_switcher_render_released_sections_and_stable_targets() {
             )
     )));
 
-    state.compose(44, 20).expect("restored mobile header");
+    open_mobile_menu(&mut state, 44, 20);
     state.handle_raw_events(vec![click(state.hits.mobile_switch)]);
     state.compose(44, 20).expect("agent switcher");
     let agent_hit = state
@@ -316,7 +316,7 @@ fn mobile_header_and_switcher_render_released_sections_and_stable_targets() {
             )
     )));
 
-    state.compose(44, 20).expect("restored mobile header");
+    open_mobile_menu(&mut state, 44, 20);
     state.handle_raw_events(vec![click(state.hits.mobile_switch)]);
     state.compose(44, 20).expect("tab switcher");
     let tab_hit = state
@@ -401,7 +401,8 @@ fn mobile_background_workspace_uses_its_own_active_tab_status() {
         })
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(text.contains("feature · tab two · 2/2"), "{text}");
+    assert!(text.contains("two → feature"), "{text}");
+    assert!(text.contains("2/2"), "{text}");
     assert!(text.contains("2 · logs"), "{text}");
     assert!(!text.contains("7 · logs"), "{text}");
 }
@@ -616,7 +617,7 @@ fn mobile_switcher_scroll_close_and_width_transition_clear_mobile_hits() {
     }
     state.set_snapshot(Box::new(projected));
     state.set_pane_surface(surface());
-    state.compose(44, 10).expect("mobile header");
+    open_mobile_menu(&mut state, 44, 10);
     state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
         kind: MouseEventKind::Down(MouseButton::Left),
         column: state.hits.mobile_switch.x,
@@ -663,7 +664,7 @@ fn mobile_switcher_scroll_close_and_width_transition_clear_mobile_hits() {
     assert!(state.navigate_workspace_id.is_none());
 
     state.compose(80, 20).expect("desktop transition");
-    assert!(state.hits.mobile_switch.is_empty());
+    assert!(state.hits.mobile_switch.is_empty() && state.hits.mobile_menu.is_empty());
     assert!(state.hits.mobile_close.is_empty());
     assert!(state.hits.mobile_targets.is_empty());
 
@@ -753,11 +754,9 @@ fn mobile_switcher_lists_spaces_before_agents() {
 }
 
 #[test]
-fn mobile_header_has_find_and_switch_but_no_collapse_button() {
+fn mobile_header_has_no_collapse_button() {
     for sidebar_collapsed in [false, true] {
-        let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
-        state.set_snapshot(Box::new(snapshot()));
-        state.set_pane_surface(surface());
+        let mut state = mobile_state();
         state.sidebar_collapsed = sidebar_collapsed;
         let frame = state.compose(60, 20).expect("mobile header");
         let header = format!(
@@ -765,33 +764,12 @@ fn mobile_header_has_find_and_switch_but_no_collapse_button() {
             mobile_row_text(&frame, 0),
             mobile_row_text(&frame, 1)
         );
-        for label in ["Find", "switch"] {
-            assert!(header.contains(label), "missing {label}");
-        }
         for label in ["Collapse", "Expand"] {
             assert!(
                 !header.contains(label),
                 "{label} does nothing visible on mobile"
             );
         }
-        let (find, switch) = (state.hits.mobile_find, state.hits.mobile_switch);
-        assert!(!find.is_empty() && !switch.is_empty());
-        assert_eq!(switch.right(), 60);
-        assert_eq!(find.right(), switch.x);
-    }
-}
-
-#[test]
-fn mobile_find_stays_visible_whenever_it_fits() {
-    for cols in 30..=64u16 {
-        let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
-        state.set_snapshot(Box::new(snapshot()));
-        state.set_pane_surface(surface());
-        state.compose(cols, 20).expect("mobile header");
-        assert!(
-            !state.hits.mobile_find.is_empty(),
-            "Find missing at {cols} columns"
-        );
     }
 }
 
@@ -800,7 +778,7 @@ fn mobile_switcher_header_has_a_find_button_next_to_close() {
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
     state.set_snapshot(Box::new(snapshot()));
     state.set_pane_surface(surface());
-    state.compose(60, 24).expect("mobile header");
+    open_mobile_menu(&mut state, 60, 24);
     state.handle_raw_events(vec![mobile_click(state.hits.mobile_switch)]);
     assert_eq!(state.mode, ClientShellMode::Navigate);
     let frame = state.compose(60, 24).expect("mobile switcher");
@@ -831,7 +809,7 @@ fn mobile_find_button_opens_live_filtering_search() {
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
     state.set_snapshot(Box::new(snapshot()));
     state.set_pane_surface(surface());
-    state.compose(60, 24).expect("mobile header");
+    open_mobile_menu(&mut state, 60, 24);
     let outcome = state.handle_raw_events(vec![mobile_click(state.hits.mobile_find)]);
     assert!(outcome.repaint);
     let Some(ClientShellOverlay::Navigator(navigator)) = state.overlay.as_ref() else {
@@ -860,4 +838,426 @@ fn mobile_find_button_opens_live_filtering_search() {
         !text.contains("client-shell ·"),
         "non-matching rows disappear"
     );
+}
+
+#[test]
+fn unfocused_tab_names_use_the_readable_gray_in_the_tab_bar() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut projected = snapshot();
+    let mut second = projected.tabs[0].clone();
+    second.tab_id = "tab_2".into();
+    second.number = 2;
+    second.label = "logs".into();
+    second.custom_label = true;
+    second.focused = false;
+    projected.tabs.push(second);
+    state.set_snapshot(Box::new(projected));
+    state.set_pane_surface(surface());
+    let frame = state.compose(100, 24).expect("desktop shell");
+    let buffer = frame.to_ratatui_buffer().expect("buffer");
+    let (rect, _) = state
+        .hits
+        .tabs
+        .iter()
+        .find(|(_, tab_id)| tab_id == "tab_2")
+        .expect("unfocused tab hit");
+    let label_x = (rect.x..rect.right())
+        .find(|x| buffer[(*x, rect.y)].symbol() == "l")
+        .expect("tab label");
+    assert_eq!(
+        buffer[(label_x, rect.y)].fg,
+        state.config.palette.subtext0,
+        "tab names use the brighter gray, not the dim overlay colors"
+    );
+}
+
+#[test]
+fn mobile_switcher_rows_follow_the_reference_layout() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut projected = snapshot();
+    projected.workspaces[0].branch =
+        Some("a-rather-long-feature-branch-name-that-keeps-going-and-going-until-it-cannot".into());
+    let mut second = projected.tabs[0].clone();
+    second.tab_id = "tab_2".into();
+    second.number = 2;
+    second.label = "logs".into();
+    second.custom_label = true;
+    second.focused = false;
+    projected.tabs.push(second);
+    projected.agents.push(ClientShellAgent {
+        pane_id: "pane_1".into(),
+        workspace_id: "ws_1".into(),
+        tab_id: "tab_2".into(),
+        name: Some("pi".into()),
+        display_agent: Some("pi".into()),
+        agent: Some("pi".into()),
+        title: None,
+        terminal_title: None,
+        terminal_title_stripped: None,
+        agent_status: AgentStatus::Idle,
+        state_change_seq: 1,
+        state_labels: Vec::new(),
+        tokens: Vec::new(),
+        focused: true,
+    });
+    state.set_snapshot(Box::new(projected));
+    state.set_pane_surface(surface());
+    let gray = state.config.palette.subtext0;
+
+    let header = state.compose(60, 40).expect("mobile header");
+    let row0 = mobile_row_text(&header, 0);
+    assert!(
+        row0.contains("tab 1 · 1/2"),
+        "top bar keeps the word tab: {row0:?}"
+    );
+
+    state.mode = ClientShellMode::Navigate;
+    let frame = state.compose(60, 40).expect("mobile switcher");
+    let buffer = frame.to_ratatui_buffer().expect("buffer");
+    let rows = (0..frame.height)
+        .map(|row| mobile_row_text(&frame, row))
+        .collect::<Vec<_>>();
+    let find = |needle: &str| {
+        rows.iter()
+            .position(|row| row.contains(needle))
+            .unwrap_or_else(|| panic!("{needle:?} missing in {rows:#?}"))
+    };
+    for title in ["spaces · Local", "agents · Local"] {
+        let at = find(title);
+        assert!(
+            rows[at + 1].trim().chars().all(|c| c == '─') && rows[at + 1].contains("────"),
+            "rule under {title}: {:?}",
+            rows[at + 1]
+        );
+    }
+    assert!(find("spaces · Local") < find("agents · Local"));
+    assert!(
+        rows.iter().all(|row| !row.contains("Local · ")),
+        "machine prefix dropped"
+    );
+    // Rules are readable, titles are not underlined, and "+ new" rides the spaces title.
+    let overlay = state.config.palette.overlay0;
+    // A rule also sits above the agents title so it is not smooshed against the last space.
+    let rule_rows = [
+        2,
+        find("spaces · Local") + 1,
+        find("agents · Local") - 1,
+        find("agents · Local") + 1,
+    ];
+    for row in rule_rows {
+        let at = (0..frame.width)
+            .find(|x| buffer[(*x, row as u16)].symbol() == "─")
+            .unwrap_or_else(|| panic!("rule glyph on row {row}"));
+        assert_eq!(
+            buffer[(at, row as u16)].fg,
+            overlay,
+            "rule color on row {row}"
+        );
+    }
+    for title in ["spaces · Local", "agents · Local"] {
+        let row = find(title) as u16;
+        let x = rows[usize::from(row)]
+            .chars()
+            .position(|c| c == 's' || c == 'a')
+            .unwrap() as u16;
+        assert!(
+            !buffer[(x, row)]
+                .modifier
+                .contains(ratatui::style::Modifier::UNDERLINED),
+            "{title} title is not underlined"
+        );
+    }
+    assert!(!rows.iter().any(|row| row.contains("+ new workspace")));
+    let title_row = find("spaces · Local");
+    assert!(
+        rows[title_row].trim_end().ends_with("+ new"),
+        "+ new on the right of the spaces title: {:?}",
+        rows[title_row]
+    );
+    let new_hit = state
+        .hits
+        .mobile_targets
+        .iter()
+        .find_map(|(rect, target)| {
+            matches!(target, ClientMobileTarget::NewWorkspace).then_some(*rect)
+        })
+        .expect("new workspace hit");
+    assert_eq!(new_hit.y as usize, title_row);
+    assert_eq!(new_hit.height, 1);
+    assert!(
+        new_hit.width < 12,
+        "only the button is clickable, not the whole title"
+    );
+
+    let hit = |wanted: fn(&ClientMobileTarget) -> bool| {
+        state
+            .hits
+            .mobile_targets
+            .iter()
+            .find(|(_, target)| wanted(target))
+            .map(|(rect, _)| *rect)
+            .expect("row hit")
+    };
+    let space = hit(|t| matches!(t, ClientMobileTarget::Workspace { .. }));
+    assert_eq!(space.height, 2, "two lines, no blank or bar row");
+    let line1 = &rows[usize::from(space.y)];
+    let line2 = &rows[usize::from(space.y) + 1];
+    assert!(
+        !line1.contains('▸'),
+        "the shade marks the current space, no marker: {line1:?}"
+    );
+    assert!(line1.contains("client-shell"), "{line1:?}");
+    assert!(
+        line1.trim_end().ends_with("1/2"),
+        "tab position on the right: {line1:?}"
+    );
+    assert!(
+        line2.trim_start().starts_with("1 → a-rather"),
+        "tab name first, then the branch: {line2:?}"
+    );
+    assert!(line2.contains('…'), "long branch truncated: {line2:?}");
+    assert!(
+        !line2.contains("tab"),
+        "no 'tab' word in the list: {line2:?}"
+    );
+    let x = line2.chars().position(|c| c == '1').unwrap() as u16;
+    assert_eq!(buffer[(x, space.y + 1)].fg, gray, "tab name gray");
+
+    let agent = hit(|t| matches!(t, ClientMobileTarget::Agent { .. }));
+    assert_eq!(agent.height, 2);
+    let line1 = &rows[usize::from(agent.y)];
+    let line2 = &rows[usize::from(agent.y) + 1];
+    assert!(
+        line1.trim_end().ends_with("idle"),
+        "state on the right: {line1:?}"
+    );
+    assert!(line2.trim_start().starts_with("logs · pi"), "{line2:?}");
+
+    let tabs = find("tabs");
+    for row in &rows[tabs..] {
+        assert!(
+            !row.contains("tab 1") || row.trim().starts_with("1"),
+            "{row:?}"
+        );
+    }
+}
+
+#[test]
+fn mobile_rows_alternate_their_background_instead_of_using_separators() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut projected = snapshot();
+    projected.focused_workspace_id = None;
+    projected.workspaces[0].focused = false;
+    let template = projected.workspaces[0].clone();
+    for index in 2..=4 {
+        let mut next = template.clone();
+        next.workspace_id = format!("ws_{index}");
+        next.label = format!("space {index}");
+        projected.workspaces.push(next);
+    }
+    for index in 1..=4 {
+        projected.agents.push(ClientShellAgent {
+            pane_id: format!("pane_{index}"),
+            workspace_id: "ws_1".into(),
+            tab_id: "tab_1".into(),
+            name: Some(format!("agent {index}")),
+            display_agent: Some("pi".into()),
+            agent: Some("pi".into()),
+            title: None,
+            terminal_title: None,
+            terminal_title_stripped: None,
+            agent_status: AgentStatus::Idle,
+            state_change_seq: 1,
+            state_labels: Vec::new(),
+            tokens: Vec::new(),
+            focused: false,
+        });
+    }
+    state.set_snapshot(Box::new(projected));
+    state.set_pane_surface(surface());
+    state.mode = ClientShellMode::Navigate;
+    let frame = state.compose(60, 60).expect("mobile switcher");
+    let buffer = frame.to_ratatui_buffer().expect("buffer");
+    for kind in ["workspace", "agent"] {
+        let mut rects = state
+            .hits
+            .mobile_targets
+            .iter()
+            .filter(|(_, target)| match kind {
+                "workspace" => matches!(target, ClientMobileTarget::Workspace { .. }),
+                _ => matches!(target, ClientMobileTarget::Agent { .. }),
+            })
+            .map(|(rect, _)| *rect)
+            .collect::<Vec<_>>();
+        rects.sort_by_key(|rect| rect.y);
+        assert!(rects.len() >= 4, "{kind} rows: {}", rects.len());
+        assert!(
+            rects.iter().all(|rect| rect.height == 2),
+            "{kind} rows are 2 lines"
+        );
+        for rect in &rects {
+            for y in rect.y..rect.bottom() {
+                for x in rect.x..rect.right() {
+                    assert!(
+                        !buffer[(x, y)]
+                            .modifier
+                            .contains(ratatui::style::Modifier::UNDERLINED),
+                        "{kind}: no underline bars ({x},{y})"
+                    );
+                }
+            }
+        }
+        let bg = |rect: &Rect| buffer[(rect.x + 3, rect.y)].bg;
+        assert_ne!(bg(&rects[0]), bg(&rects[1]), "{kind}: neighbours differ");
+        assert_eq!(
+            bg(&rects[0]),
+            bg(&rects[2]),
+            "{kind}: every other row matches"
+        );
+        assert_eq!(
+            bg(&rects[1]),
+            bg(&rects[3]),
+            "{kind}: every other row matches"
+        );
+        // The whole row, both lines and the far edge, carries its background.
+        assert_eq!(
+            bg(&rects[1]),
+            buffer[(rects[1].right() - 1, rects[1].y + 1)].bg
+        );
+    }
+}
+
+/// Opens the header menu so that its buttons have hit rects.
+fn open_mobile_menu(state: &mut ClientShellState, cols: u16, rows: u16) {
+    state.compose(cols, rows).expect("mobile header");
+    state.handle_raw_events(vec![mobile_click(state.hits.mobile_menu)]);
+    state.compose(cols, rows).expect("mobile menu");
+}
+
+fn mobile_state() -> ClientShellState {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+    state
+}
+
+#[test]
+fn mobile_header_has_one_menu_button_instead_of_find_and_switch() {
+    for cols in 30..=64u16 {
+        let mut state = mobile_state();
+        let frame = state.compose(cols, 20).expect("mobile header");
+        let header = format!(
+            "{}{}",
+            mobile_row_text(&frame, 0),
+            mobile_row_text(&frame, 1)
+        );
+        assert!(
+            header.contains("menu"),
+            "menu missing at {cols}: {header:?}"
+        );
+        for label in ["Find", "switch"] {
+            assert!(
+                !header.contains(label),
+                "{label} lives in the menu: {header:?}"
+            );
+        }
+        let menu = state.hits.mobile_menu;
+        assert!(!menu.is_empty(), "menu hit missing at {cols}");
+        assert_eq!(menu.right(), cols, "top right corner");
+        assert_eq!(menu.y, 0);
+        assert!(menu.width < 10, "narrower than the old switch button");
+        assert!(state.hits.mobile_find.is_empty() && state.hits.mobile_switch.is_empty());
+        assert!(state.hits.mobile_menu_panel.is_empty(), "closed by default");
+    }
+}
+
+#[test]
+fn mobile_menu_opens_a_panel_of_equal_sized_two_row_buttons() {
+    let mut state = mobile_state();
+    open_mobile_menu(&mut state, 60, 24);
+    assert!(state.mobile_menu_open);
+    let (find, switch) = (state.hits.mobile_find, state.hits.mobile_switch);
+    assert!(!find.is_empty() && !switch.is_empty());
+    assert_eq!((find.width, find.height), (switch.width, switch.height));
+    assert_eq!(find.height, 2, "two rows tall like the header buttons");
+    assert_eq!(find.y, switch.y, "side by side while they fit");
+    assert!(find.x < switch.x);
+    let panel = state.hits.mobile_menu_panel;
+    assert_eq!(panel.y, 2, "directly below the header");
+    assert!(panel.contains(find.as_position()) && panel.contains(switch.as_position()));
+    let frame = state.compose(60, 24).expect("mobile menu");
+    let text = (panel.y..panel.bottom())
+        .map(|row| mobile_row_text(&frame, row))
+        .collect::<String>();
+    assert!(text.contains("Find") && text.contains("switch"), "{text:?}");
+}
+
+#[test]
+fn mobile_menu_buttons_wrap_into_more_bands_when_the_screen_is_narrow() {
+    let mut state = mobile_state();
+    open_mobile_menu(&mut state, 14, 24);
+    let (find, switch) = (state.hits.mobile_find, state.hits.mobile_switch);
+    assert_eq!((find.width, find.height), (switch.width, switch.height));
+    assert_eq!(switch.y, find.y + 2, "the second button starts a new band");
+    assert_eq!(state.hits.mobile_menu_panel.height, 4);
+}
+
+#[test]
+fn mobile_menu_switch_opens_the_switcher_and_closes_the_menu() {
+    let mut state = mobile_state();
+    open_mobile_menu(&mut state, 60, 24);
+    let outcome = state.handle_raw_events(vec![mobile_click(state.hits.mobile_switch)]);
+    assert!(outcome.repaint);
+    assert_eq!(state.mode, ClientShellMode::Navigate);
+    assert!(!state.mobile_menu_open);
+    state.compose(60, 24).expect("mobile switcher");
+    assert!(state.hits.mobile_menu_panel.is_empty());
+}
+
+#[test]
+fn mobile_menu_find_opens_search_and_closes_the_menu() {
+    let mut state = mobile_state();
+    open_mobile_menu(&mut state, 60, 24);
+    let outcome = state.handle_raw_events(vec![mobile_click(state.hits.mobile_find)]);
+    assert!(outcome.repaint);
+    assert!(!state.mobile_menu_open);
+    let Some(ClientShellOverlay::Navigator(navigator)) = state.overlay.as_ref() else {
+        panic!("Find must open the navigator search");
+    };
+    assert!(navigator.search_focused);
+}
+
+#[test]
+fn mobile_menu_closes_on_the_menu_button_another_tap_or_typing() {
+    for closer in ["menu", "elsewhere", "typing"] {
+        let mut state = mobile_state();
+        open_mobile_menu(&mut state, 60, 24);
+        assert!(state.mobile_menu_open, "{closer}");
+        let events = match closer {
+            "menu" => vec![mobile_click(state.hits.mobile_menu)],
+            "elsewhere" => vec![mobile_click(Rect::new(5, 15, 1, 1))],
+            _ => vec![RawInputEvent::Key(crate::input::TerminalKey::new(
+                KeyCode::Char('x'),
+                KeyModifiers::empty(),
+            ))],
+        };
+        let outcome = state.handle_raw_events(events);
+        assert!(outcome.repaint, "{closer}");
+        assert!(!state.mobile_menu_open, "{closer} closes the menu");
+        assert_eq!(state.mode, ClientShellMode::Terminal, "{closer}");
+        assert!(state.overlay.is_none(), "{closer}");
+        state.compose(60, 24).expect("closed menu");
+        assert!(state.hits.mobile_menu_panel.is_empty(), "{closer}");
+    }
+}
+
+#[test]
+fn mobile_menu_does_not_exist_on_desktop() {
+    let mut state = mobile_state();
+    state.compose(106, 30).expect("desktop");
+    assert!(state.hits.mobile_menu.is_empty());
+    state.mobile_menu_open = true;
+    state.compose(106, 30).expect("desktop");
+    assert!(!state.mobile_menu_open, "a stale open flag is dropped");
+    assert!(state.hits.mobile_menu_panel.is_empty());
 }

@@ -162,10 +162,31 @@ fn sort_aggregate_rows(
 ) {
     if sort == crate::config::AgentPanelSortConfig::Priority {
         rows.sort_by_key(|row| {
+            let (acknowledged, changed) = activity_key(
+                row.endpoint.snapshot,
+                row.agent.agent_status,
+                &row.agent.pane_id,
+            );
             (
                 row.endpoint.stale(),
-                std::cmp::Reverse(status_priority(row.agent.agent_status)),
+                acknowledged,
+                row.endpoint.endpoint_index,
+                changed,
                 std::cmp::Reverse(row.recency),
+            )
+        });
+    } else {
+        rows.sort_by_key(|row| {
+            let (acknowledged, changed) = activity_key(
+                row.endpoint.snapshot,
+                row.agent.agent_status,
+                &row.agent.pane_id,
+            );
+            (
+                row.endpoint.stale(),
+                acknowledged,
+                row.endpoint.endpoint_index,
+                changed,
             )
         });
     }

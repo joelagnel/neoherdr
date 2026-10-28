@@ -228,3 +228,73 @@ fn desktop_find_button_sits_next_to_collapse_and_opens_search() {
     };
     assert!(navigator.search_focused);
 }
+
+#[test]
+fn space_rows_show_the_active_tab_name_in_readable_gray() {
+    let mut projected = snapshot();
+    projected.tabs[0].label = "logs".into();
+    projected.tabs[0].custom_label = true;
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(projected));
+    state.set_pane_surface(surface());
+    let frame = state.compose(100, 30).expect("desktop shell");
+    let buffer = frame.to_ratatui_buffer().expect("buffer");
+    let row = state.hits.workspaces[0].rect.y + 1;
+    let text = (0..26)
+        .map(|x| buffer[(x, row)].symbol())
+        .collect::<String>();
+    assert!(
+        text.contains("logs"),
+        "tab name on the branch row: {text:?}"
+    );
+    assert!(text.contains("main"), "branch still shown: {text:?}");
+    let x = (0..26)
+        .find(|x| buffer[(*x, row)].symbol() == "l")
+        .expect("tab label cell");
+    assert_eq!(buffer[(x, row)].fg, state.config.palette.subtext0);
+}
+
+#[test]
+fn space_rows_lead_with_the_bare_tab_name_then_the_branch() {
+    let mut projected = snapshot();
+    projected.workspaces[0].branch = Some("a-rather-long-feature-branch-name".into());
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(projected));
+    state.set_pane_surface(surface());
+    let frame = state.compose(100, 30).expect("desktop shell");
+    let buffer = frame.to_ratatui_buffer().expect("buffer");
+    let row = state.hits.workspaces[0].rect.y + 1;
+    let text = (0..25)
+        .map(|x| buffer[(x, row)].symbol())
+        .collect::<String>();
+    assert!(!text.contains("tab"), "no 'tab' word: {text:?}");
+    assert!(
+        text.trim_start().starts_with("1 → a-rather"),
+        "got {text:?}"
+    );
+    assert!(text.contains('…'), "long branch truncated: {text:?}");
+}
+
+#[test]
+fn space_rows_show_the_tab_position_at_the_right_edge() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut projected = snapshot();
+    let mut second = projected.tabs[0].clone();
+    second.tab_id = "tab_2".into();
+    second.number = 2;
+    second.focused = false;
+    projected.tabs.push(second);
+    state.set_snapshot(Box::new(projected));
+    state.set_pane_surface(surface());
+    let frame = state.compose(100, 30).expect("desktop shell");
+    let buffer = frame.to_ratatui_buffer().expect("buffer");
+    let row = state.hits.workspaces[0].rect.y;
+    let text = (0..25)
+        .map(|x| buffer[(x, row)].symbol())
+        .collect::<String>();
+    assert!(text.contains("client-shell"), "{text:?}");
+    assert!(
+        text.trim_end().ends_with("1/2"),
+        "tab position on the right: {text:?}"
+    );
+}
