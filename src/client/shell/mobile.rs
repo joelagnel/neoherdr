@@ -159,7 +159,7 @@ fn render_header_status(
         area.y,
         tab_width.saturating_sub(1),
         &tab_status,
-        Style::default().fg(palette.overlay1).bg(palette.panel_bg),
+        Style::default().fg(palette.green).bg(palette.panel_bg),
     );
     if area.height > 1 {
         render_agent_summary(
@@ -205,6 +205,24 @@ fn render_header_button(buffer: &mut Buffer, area: Rect, label: &str, palette: &
     );
 }
 
+/// Splits `text` into consecutive spans of the given char lengths and styles;
+/// anything past the listed segments uses `rest`.
+fn segmented_line(text: &str, segments: &[(usize, Style)], rest: Style) -> Line<'static> {
+    let mut chars = text.chars();
+    let mut spans = Vec::new();
+    for (len, style) in segments {
+        let part = chars.by_ref().take(*len).collect::<String>();
+        if !part.is_empty() {
+            spans.push(Span::styled(part, *style));
+        }
+    }
+    let tail = chars.collect::<String>();
+    if !tail.is_empty() {
+        spans.push(Span::styled(tail, rest));
+    }
+    Line::from(spans)
+}
+
 fn mobile_endpoint_state(status: ClientEndpointStatus) -> &'static str {
     match status {
         ClientEndpointStatus::Connecting => "connecting",
@@ -230,9 +248,9 @@ fn compact_tab_status(snapshot: &ClientShellSnapshot, workspace: &ClientShellWor
         .map(|tab| tab.label.as_str())
         .unwrap_or("1");
     if tabs.len() <= 1 {
-        format!("tab {label}")
+        label.to_owned()
     } else {
-        format!("tab {label} · {}/{}", active + 1, tabs.len())
+        format!("{label} · {}/{}", active + 1, tabs.len())
     }
 }
 
@@ -661,6 +679,7 @@ fn mobile_items(
                 .map(|workspace| workspace.label.as_str())
                 .unwrap_or(agent_label);
             let mut detail = Vec::new();
+            let mut agent_tab_len = 0usize;
             let workspace_tab_count = endpoint
                 .snapshot
                 .tabs
@@ -668,6 +687,7 @@ fn mobile_items(
                 .filter(|candidate| candidate.workspace_id == agent.workspace_id)
                 .count();
             if let Some(tab) = tab.filter(|tab| tab.custom_label || workspace_tab_count > 1) {
+                agent_tab_len = tab.label.chars().count();
                 detail.push(tab.label.clone());
             }
             let status_key = status_text(agent.agent_status);
@@ -731,16 +751,20 @@ fn mobile_items(
                                 .add_modifier(Modifier::BOLD | dim),
                         ),
                     ]),
-                    Line::from(Span::styled(
-                        crate::ui::truncate_end(
-                            &format!("  {}", detail.join(" · ")),
-                            usize::from(content_width),
-                        ),
-                        Style::default()
+                    {
+                        let muted = Style::default()
                             .fg(palette.overlay0)
                             .bg(background)
-                            .add_modifier(dim),
-                    )),
+                            .add_modifier(dim);
+                        segmented_line(
+                            &crate::ui::truncate_end(
+                                &format!("  {}", detail.join(" · ")),
+                                usize::from(content_width),
+                            ),
+                            &[(2, muted), (agent_tab_len, muted.fg(palette.green))],
+                            muted,
+                        )
+                    },
                 ],
                 background,
                 target: Some(ClientMobileTarget::Agent {
@@ -861,19 +885,38 @@ fn mobile_items(
                                 .add_modifier(Modifier::BOLD | dim),
                         ),
                     ]),
-                    Line::from(Span::styled(
-                        crate::ui::truncate_end(
-                            &format!(
-                                "{detail_prefix}{branch} · {}{stale_detail}",
-                                compact_tab_status(endpoint.snapshot, workspace)
-                            ),
-                            usize::from(content_width),
-                        ),
-                        Style::default()
+                    {
+                        let tab = compact_tab_status(endpoint.snapshot, workspace);
+                        let muted = Style::default()
                             .fg(palette.overlay0)
                             .bg(background)
-                            .add_modifier(dim),
-                    )),
+                            .add_modifier(dim);
+                        let tab_style = Style::default()
+                            .fg(palette.green)
+                            .bg(background)
+                            .add_modifier(dim);
+                        // Tab name first; the branch gets whatever width is left.
+                        let used = detail_prefix.chars().count()
+                            + tab.chars().count()
+                            + stale_detail.chars().count();
+                        let branch_budget = usize::from(content_width).saturating_sub(used + 3);
+                        let branch_part = if branch_budget >= 2 {
+                            format!(" · {}", crate::ui::truncate_end(branch, branch_budget))
+                        } else {
+                            String::new()
+                        };
+                        segmented_line(
+                            &crate::ui::truncate_end(
+                                &format!("{detail_prefix}{tab}{branch_part}{stale_detail}"),
+                                usize::from(content_width),
+                            ),
+                            &[
+                                (detail_prefix.chars().count(), muted),
+                                (tab.chars().count(), tab_style),
+                            ],
+                            muted,
+                        )
+                    },
                 ],
                 background,
                 target: Some(ClientMobileTarget::Workspace {
@@ -908,7 +951,7 @@ fn mobile_items(
             let label = if tab.custom_label {
                 format!("{} · {}", index + 1, tab.label)
             } else {
-                format!("tab {}", tab.label)
+                tab.label.clone()
             };
             let label = format!(
                 "  {}",
@@ -918,7 +961,7 @@ fn mobile_items(
                 lines: vec![Line::from(Span::styled(
                     label,
                     Style::default()
-                        .fg(palette.text)
+                        .fg(palette.green)
                         .bg(background)
                         .add_modifier(Modifier::BOLD),
                 ))],

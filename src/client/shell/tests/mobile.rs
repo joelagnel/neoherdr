@@ -220,7 +220,10 @@ fn mobile_header_and_switcher_render_released_sections_and_stable_targets() {
         .collect::<String>();
     // Find shares the header with the status, so the workspace name is truncated here.
     assert!(header_text.contains("clie"));
-    assert!(header_text.contains("tab 1"));
+    assert!(
+        !header_text.contains("tab 1"),
+        "no 'tab' word in the header"
+    );
     assert!(header_text.contains("blocked"));
     assert!(header_text.contains("switch"));
     assert_eq!(state.hits.mobile_switch, Rect::new(34, 0, 10, 2));
@@ -401,7 +404,7 @@ fn mobile_background_workspace_uses_its_own_active_tab_status() {
         })
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(text.contains("feature · tab two · 2/2"), "{text}");
+    assert!(text.contains("two · 2/2 · feature"), "{text}");
     assert!(text.contains("2 · logs"), "{text}");
     assert!(!text.contains("7 · logs"), "{text}");
 }
@@ -829,4 +832,111 @@ fn mobile_find_button_opens_live_filtering_search() {
         !text.contains("client-shell ·"),
         "non-matching rows disappear"
     );
+}
+
+#[test]
+fn tab_names_use_the_green_accent_in_the_tab_bar() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut projected = snapshot();
+    let mut second = projected.tabs[0].clone();
+    second.tab_id = "tab_2".into();
+    second.number = 2;
+    second.label = "logs".into();
+    second.custom_label = true;
+    second.focused = false;
+    projected.tabs.push(second);
+    state.set_snapshot(Box::new(projected));
+    state.set_pane_surface(surface());
+    let frame = state.compose(100, 24).expect("desktop shell");
+    let buffer = frame.to_ratatui_buffer().expect("buffer");
+    let (rect, _) = state
+        .hits
+        .tabs
+        .iter()
+        .find(|(_, tab_id)| tab_id == "tab_2")
+        .expect("unfocused tab hit");
+    let label_x = (rect.x..rect.right())
+        .find(|x| buffer[(*x, rect.y)].symbol() == "l")
+        .expect("tab label");
+    assert_eq!(
+        buffer[(label_x, rect.y)].fg,
+        state.config.palette.green,
+        "tab names must not use the gray overlay colors"
+    );
+}
+
+#[test]
+fn mobile_switcher_and_header_show_bare_tab_names_in_green() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut projected = snapshot();
+    projected.workspaces[0].branch =
+        Some("a-rather-long-feature-branch-name-that-keeps-going-and-going".into());
+    let mut second = projected.tabs[0].clone();
+    second.tab_id = "tab_2".into();
+    second.number = 2;
+    second.label = "logs".into();
+    second.custom_label = true;
+    second.focused = false;
+    projected.tabs.push(second);
+    state.set_snapshot(Box::new(projected));
+    state.set_pane_surface(surface());
+    let green = state.config.palette.green;
+
+    let header = state.compose(60, 30).expect("mobile header");
+    let buffer = header.to_ratatui_buffer().expect("buffer");
+    let row0 = (0..60).map(|x| buffer[(x, 0)].symbol()).collect::<String>();
+    assert!(
+        !row0.contains("tab"),
+        "no 'tab' word in the header: {row0:?}"
+    );
+    let start = row0.find("1 · 1/2").expect("tab status in the header");
+    assert_eq!(buffer[(start as u16, 0)].fg, green, "header tab status");
+
+    state.mode = ClientShellMode::Navigate;
+    let frame = state.compose(60, 30).expect("mobile switcher");
+    let buffer = frame.to_ratatui_buffer().expect("buffer");
+    let row_text = |rect: Rect| {
+        (rect.x..rect.right())
+            .map(|x| buffer[(x, rect.y)].symbol())
+            .collect::<String>()
+    };
+    let tab_hit = |id: &str| {
+        state
+            .hits
+            .mobile_targets
+            .iter()
+            .find_map(|(rect, target)| {
+                matches!(target, ClientMobileTarget::Tab { tab_id, .. } if tab_id == id)
+                    .then_some(*rect)
+            })
+            .expect("tab row")
+    };
+    for (id, needle) in [("tab_1", "1"), ("tab_2", "logs")] {
+        let rect = tab_hit(id);
+        let text = row_text(rect);
+        assert!(!text.contains("tab"), "no 'tab' word in tab rows: {text:?}");
+        let x = rect.x + text.find(needle).expect("label") as u16;
+        assert_eq!(buffer[(x, rect.y)].fg, green, "{id} row");
+    }
+    let workspace = state
+        .hits
+        .mobile_targets
+        .iter()
+        .find_map(|(rect, target)| {
+            matches!(target, ClientMobileTarget::Workspace { .. }).then_some(*rect)
+        })
+        .expect("workspace row");
+    let detail = Rect::new(workspace.x, workspace.y + 1, workspace.width, 1);
+    let text = row_text(detail);
+    assert!(
+        text.trim_start().starts_with("1 · 1/2 · a-rather"),
+        "tab name first, then the branch: {text:?}"
+    );
+    assert!(
+        text.contains('…'),
+        "long branch truncated, tab kept: {text:?}"
+    );
+    assert!(!text.contains("tab"), "no 'tab' word: {text:?}");
+    let x = detail.x + text.find('1').unwrap() as u16;
+    assert_eq!(buffer[(x, detail.y)].fg, green, "workspace detail tab name");
 }

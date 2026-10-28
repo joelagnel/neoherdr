@@ -186,3 +186,49 @@ fn desktop_find_button_sits_next_to_collapse_and_opens_search() {
     };
     assert!(navigator.search_focused);
 }
+
+#[test]
+fn space_rows_show_the_active_tab_name_in_green() {
+    let mut projected = snapshot();
+    projected.tabs[0].label = "logs".into();
+    projected.tabs[0].custom_label = true;
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(projected));
+    state.set_pane_surface(surface());
+    let frame = state.compose(100, 30).expect("desktop shell");
+    let buffer = frame.to_ratatui_buffer().expect("buffer");
+    let row = state.hits.workspaces[0].rect.y + 1;
+    let text = (0..26)
+        .map(|x| buffer[(x, row)].symbol())
+        .collect::<String>();
+    assert!(
+        text.contains("logs"),
+        "tab name on the branch row: {text:?}"
+    );
+    assert!(text.contains("main"), "branch still shown: {text:?}");
+    let x = (0..26)
+        .find(|x| buffer[(*x, row)].symbol() == "l")
+        .expect("tab label cell");
+    assert_eq!(buffer[(x, row)].fg, state.config.palette.green);
+}
+
+#[test]
+fn space_rows_lead_with_the_bare_tab_name_then_the_branch() {
+    let mut projected = snapshot();
+    projected.workspaces[0].branch = Some("a-rather-long-feature-branch-name".into());
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(projected));
+    state.set_pane_surface(surface());
+    let frame = state.compose(100, 30).expect("desktop shell");
+    let buffer = frame.to_ratatui_buffer().expect("buffer");
+    let row = state.hits.workspaces[0].rect.y + 1;
+    let text = (0..25)
+        .map(|x| buffer[(x, row)].symbol())
+        .collect::<String>();
+    assert!(!text.contains("tab"), "no 'tab' word: {text:?}");
+    assert!(
+        text.trim_start().starts_with("1 · a-rather"),
+        "got {text:?}"
+    );
+    assert!(text.contains('…'), "long branch truncated: {text:?}");
+}

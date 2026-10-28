@@ -375,6 +375,7 @@ pub(crate) fn render_sidebar(
                 .get(entry.index)
                 .map(|workspace| {
                     workspace_rows(
+                        snapshot,
                         workspace,
                         displayed_workspace_status(snapshot, workspace, state.collapsed_groups),
                         entry.indented,
@@ -435,7 +436,7 @@ pub(crate) fn render_sidebar(
             continue;
         };
         let status = displayed_workspace_status(snapshot, workspace, state.collapsed_groups);
-        let rows = workspace_rows(workspace, status, entry.indented, &config.spaces);
+        let rows = workspace_rows(snapshot, workspace, status, entry.indented, &config.spaces);
         let row_height = (rows.len().max(1).min(u16::MAX as usize) as u16).min(body.height);
         if y.saturating_add(row_height) > body.bottom() {
             break;
@@ -789,6 +790,7 @@ pub(in crate::client::shell) fn displayed_workspace_status(
 }
 
 pub(in crate::client::shell) fn workspace_rows(
+    snapshot: &ClientShellSnapshot,
     workspace: &ClientShellWorkspace,
     status: crate::api::schema::AgentStatus,
     indented: bool,
@@ -804,7 +806,7 @@ pub(in crate::client::shell) fn workspace_rows(
         &workspace.label
     };
     let token_values = workspace.tokens.iter().cloned().collect::<HashMap<_, _>>();
-    crate::ui::sidebar_space_rows(
+    let mut rows = crate::ui::sidebar_space_rows(
         config,
         crate::ui::SpaceTokenContext {
             workspace: label,
@@ -814,7 +816,36 @@ pub(in crate::client::shell) fn workspace_rows(
             tokens: &token_values,
             suppress_git_details: indented,
         },
-    )
+    );
+    add_active_tab_token(&mut rows, snapshot, workspace, config.rows.len());
+    rows
+}
+
+/// Puts the active tab's bare name at the start of the second (detail) row.
+fn add_active_tab_token(
+    rows: &mut Vec<Vec<crate::ui::ResolvedToken>>,
+    snapshot: &ClientShellSnapshot,
+    workspace: &ClientShellWorkspace,
+    configured_rows: usize,
+) {
+    if configured_rows < 2 {
+        return;
+    }
+    let Some(tab) = snapshot
+        .tabs
+        .iter()
+        .find(|tab| tab.tab_id == workspace.active_tab_id)
+    else {
+        return;
+    };
+    let token = crate::ui::ResolvedToken {
+        kind: crate::ui::ResolvedTokenKind::Tab(tab.label.clone()),
+        style: Default::default(),
+    };
+    match rows.get_mut(1) {
+        Some(row) => row.insert(0, token),
+        None => rows.push(vec![token]),
+    }
 }
 
 pub(in crate::client::shell) fn render_workspace_rows(
