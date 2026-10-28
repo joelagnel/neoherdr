@@ -463,7 +463,7 @@ fn agent_navigation_reveals_target_using_destination_sort() {
             .clone()
             .unwrap();
         for (index, agent) in projection.agents.iter_mut().enumerate() {
-            agent.state_change_seq = base + index as u64;
+            agent.state_change_seq = base + 7 - index as u64;
         }
         if endpoint_id == remote {
             projection.agent_view_label = Some("recent".into());
@@ -476,7 +476,7 @@ fn agent_navigation_reveals_target_using_destination_sort() {
     view.filter = None;
     view.sort = vec![AgentViewSort {
         field: AgentViewSortField::Builtin(AgentViewBuiltinSortField::StateChangeSeq),
-        order: AgentViewSortOrder::Desc,
+        order: AgentViewSortOrder::Asc,
     }];
     state.set_test_endpoint_agent_view(&remote, Some(view));
     state.compose(100, 28).unwrap();
@@ -1243,7 +1243,8 @@ fn active_workspace_is_the_only_highlight_when_machine_is_expanded() {
     );
     assert_eq!(
         buffer[(workspace.x + 2, workspace.y)].bg,
-        state.config.palette.active_row_bg
+        crate::client::shell::mobile::accent_tint(&state.config.palette, false)
+            .unwrap_or(state.config.palette.active_row_bg)
     );
 
     state.collapsed_endpoints.insert(endpoint_id.clone());

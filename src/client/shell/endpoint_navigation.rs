@@ -35,11 +35,46 @@ impl ClientShellState {
         press: ClientWorkspacePress,
         outcome: &mut ClientShellInput,
     ) {
-        self.focus_or_activate(
-            press.endpoint_id,
-            ClientEndpointFocusTarget::Workspace(press.workspace_id),
-            outcome,
-        );
+        // A space with a colored circle opens on the tab that earned it, not on the tab it
+        // happened to show last.
+        let target = self
+            .space_attention_pane(&press.endpoint_id, &press.workspace_id)
+            .map_or(
+                ClientEndpointFocusTarget::Workspace(press.workspace_id),
+                ClientEndpointFocusTarget::Pane,
+            );
+        self.focus_or_activate(press.endpoint_id, target, outcome);
+    }
+
+    /// The agent pane that colors a space's circle: the most urgent status, then the newest
+    /// state change. `None` for a space with nothing but idle agents.
+    fn space_attention_pane(
+        &self,
+        endpoint_id: &ClientEndpointId,
+        workspace_id: &str,
+    ) -> Option<String> {
+        use crate::api::schema::AgentStatus;
+        self.endpoints
+            .iter()
+            .find(|endpoint| &endpoint.endpoint_id == endpoint_id)?
+            .snapshot
+            .as_deref()?
+            .agents
+            .iter()
+            .filter(|agent| {
+                agent.workspace_id == workspace_id
+                    && matches!(
+                        agent.agent_status,
+                        AgentStatus::Working | AgentStatus::Blocked | AgentStatus::Done
+                    )
+            })
+            .max_by_key(|agent| {
+                (
+                    super::status_priority(agent.agent_status),
+                    agent.state_change_seq,
+                )
+            })
+            .map(|agent| agent.pane_id.clone())
     }
 
     pub(super) fn handle_endpoint_machine_click(

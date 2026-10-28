@@ -727,7 +727,11 @@ fn render_navigator_overlay(
         q.x + 2,
         q.y,
         q.width.saturating_sub(4),
-        " Go to ",
+        if n.workspace_scope.is_some() {
+            " Tabs "
+        } else {
+            " Go to "
+        },
         Style::default().fg(p.accent).bg(p.panel_bg),
     );
     let rows = super::aggregate_navigation::navigator_rows(endpoints, active_endpoint_id, n);
@@ -744,7 +748,11 @@ fn render_navigator_overlay(
             }
         )
     } else if n.query.is_empty() {
-        " / search agents and terminals".to_owned()
+        if n.workspace_scope.is_some() {
+            " / search tabs".to_owned()
+        } else {
+            " / search agents and terminals".to_owned()
+        }
     } else {
         format!(" / {}", n.query)
     };
@@ -754,10 +762,11 @@ fn render_navigator_overlay(
         .count();
     let count = format!(
         "{terminal_count} {}",
-        if terminal_count == 1 {
-            "terminal"
-        } else {
-            "terminals"
+        match (n.workspace_scope.is_some(), terminal_count == 1) {
+            (true, true) => "tab",
+            (true, false) => "tabs",
+            (false, true) => "terminal",
+            (false, false) => "terminals",
         }
     );
     put_text(

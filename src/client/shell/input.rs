@@ -381,6 +381,9 @@ impl ClientShellState {
         outcome: &mut ClientShellInput,
     ) {
         outcome.repaint |= self.clear_link_hover();
+        if std::mem::take(&mut self.mobile_menu_open) {
+            outcome.repaint = true;
+        }
         if self.copy_operation_in_flight {
             self.copy_input_queue.push_back(key);
             return;

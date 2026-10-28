@@ -162,10 +162,31 @@ fn sort_aggregate_rows(
 ) {
     if sort == crate::config::AgentPanelSortConfig::Priority {
         rows.sort_by_key(|row| {
+            let (acknowledged, changed) = activity_key(
+                row.endpoint.snapshot,
+                row.agent.agent_status,
+                &row.agent.pane_id,
+            );
             (
                 row.endpoint.stale(),
-                std::cmp::Reverse(status_priority(row.agent.agent_status)),
+                acknowledged,
+                row.endpoint.endpoint_index,
+                changed,
                 std::cmp::Reverse(row.recency),
+            )
+        });
+    } else {
+        rows.sort_by_key(|row| {
+            let (acknowledged, changed) = activity_key(
+                row.endpoint.snapshot,
+                row.agent.agent_status,
+                &row.agent.pane_id,
+            );
+            (
+                row.endpoint.stale(),
+                acknowledged,
+                row.endpoint.endpoint_index,
+                changed,
             )
         });
     }
@@ -297,11 +318,15 @@ pub(super) fn navigator_rows(
         words.iter().all(|word| value.contains(word))
     };
     let filtering = navigator.filter.is_some() || !query.is_empty();
-    let federated = endpoints.len() > 1;
+    let scope = navigator.workspace_scope.as_deref();
+    let federated = endpoints.len() > 1 && scope.is_none();
     let depth_offset = u8::from(federated);
     let mut rows = Vec::new();
 
     for endpoint in endpoints {
+        if scope.is_some() && endpoint.endpoint_id != *active_endpoint_id {
+            continue;
+        }
         let stale = endpoint.status != ClientEndpointStatus::Online;
         let endpoint_query_matches = !query.is_empty() && text(&endpoint.label);
         let mut endpoint_rows = Vec::new();
@@ -329,6 +354,9 @@ pub(super) fn navigator_rows(
                     .push(pane);
             }
             for workspace in &snapshot.workspaces {
+                if scope.is_some_and(|scope| scope != workspace.workspace_id) {
+                    continue;
+                }
                 let workspace_matches = endpoint_query_matches
                     || text(&workspace.label)
                     || workspace.branch.as_deref().is_some_and(text);
@@ -366,7 +394,12 @@ pub(super) fn navigator_rows(
                         let tab_name = (tab.custom_label || tab.label.parse::<usize>().is_err())
                             .then_some(tab.label.as_str());
                         let label = if tab_panes.len() == 1 {
-                            match name.or(tab_name).or(title) {
+                            let preferred = if scope.is_some() {
+                                tab_name.or(name).or(title)
+                            } else {
+                                name.or(tab_name).or(title)
+                            };
+                            match preferred {
                                 Some(label) => label.to_owned(),
                                 None if multiple_tabs => {
                                     format!("{} · {}", agent_kind.unwrap_or("terminal"), tab.label)
@@ -400,7 +433,7 @@ pub(super) fn navigator_rows(
                                 || text(&pane.pane_id))
                         {
                             children.push(ClientNavigatorRow {
-                                depth: 1 + depth_offset,
+                                depth: if scope.is_some() { 0 } else { 1 + depth_offset },
                                 label,
                                 meta: meta.to_owned(),
                                 detail: format!(
@@ -420,7 +453,9 @@ pub(super) fn navigator_rows(
                         }
                     }
                 }
-                if !filtering
+                if scope.is_some() {
+                    endpoint_rows.extend(children);
+                } else if !filtering
                     || !children.is_empty()
                     || (navigator.filter.is_none() && !query.is_empty() && workspace_matches)
                 {
@@ -442,7 +477,7 @@ pub(super) fn navigator_rows(
                 }
             }
         }
-        if !filtering || endpoint_query_matches || !endpoint_rows.is_empty() {
+        if scope.is_some() || !filtering || endpoint_query_matches || !endpoint_rows.is_empty() {
             if federated {
                 rows.push(ClientNavigatorRow {
                     depth: 0,

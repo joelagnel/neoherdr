@@ -191,12 +191,26 @@ impl ClientShellState {
     }
 
     pub(super) fn open_navigator_overlay(&mut self) {
+        self.open_navigator_overlay_scoped(None);
+    }
+
+    /// A Find-style list of just the tabs in the focused space, for quick tab switching.
+    pub(super) fn open_tabs_overlay(&mut self) {
+        let workspace_scope = self
+            .snapshot
+            .as_deref()
+            .and_then(|snapshot| snapshot.focused_workspace_id.clone());
+        self.open_navigator_overlay_scoped(workspace_scope);
+    }
+
+    fn open_navigator_overlay_scoped(&mut self, workspace_scope: Option<String>) {
         let mut navigator = ClientNavigatorOverlay {
             query: TextEditor::default(),
             search_focused: false,
             selected: None,
             scroll: 0,
             filter: None,
+            workspace_scope,
         };
         let rows =
             render::client_navigator_rows(&self.endpoints, &self.active_endpoint_id, &navigator);

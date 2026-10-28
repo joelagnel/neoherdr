@@ -119,7 +119,13 @@ pub(super) struct ShellHitMap {
     pub(super) new_tab: Rect,
     pub(super) tab_scroll_left: Rect,
     pub(super) tab_scroll_right: Rect,
+    pub(super) mobile_menu: Rect,
+    pub(super) mobile_side: Rect,
+    pub(super) mobile_menu_panel: Rect,
     pub(super) mobile_switch: Rect,
+    pub(super) mobile_goto_done: Rect,
+    pub(super) mobile_tabs: Rect,
+    pub(super) mobile_next_working: Rect,
     pub(super) mobile_find: Rect,
     pub(super) mobile_close: Rect,
     pub(super) mobile_targets: Vec<(Rect, ClientMobileTarget)>,
@@ -380,6 +386,8 @@ pub(super) struct ClientNavigatorOverlay {
     pub(super) selected: Option<ClientNavigatorTarget>,
     pub(super) scroll: usize,
     pub(super) filter: Option<ClientNavigatorFilter>,
+    /// Lists only the tabs of this space (on the active machine), without headers.
+    pub(super) workspace_scope: Option<String>,
 }
 
 #[derive(Debug)]
@@ -903,6 +911,7 @@ pub(crate) struct ClientShellState {
     pub(super) reveal_focused_workspace: bool,
     pub(super) reveal_mobile_workspace: bool,
     pub(super) mobile_switcher_suspended: bool,
+    pub(super) mobile_menu_open: bool,
     pub(super) reveal_focused_tab: bool,
     pub(super) last_tab_bar_width: Option<u16>,
     pub(super) last_composed_size: Option<(u16, u16)>,
@@ -1077,6 +1086,7 @@ impl ClientShellState {
             reveal_focused_workspace: true,
             reveal_mobile_workspace: false,
             mobile_switcher_suspended: false,
+            mobile_menu_open: false,
             reveal_focused_tab: true,
             last_tab_bar_width: None,
             last_composed_size: None,
