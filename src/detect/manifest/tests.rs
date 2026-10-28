@@ -907,3 +907,137 @@ contains = ["active"]
 "#;
     assert!(parse_manifest(manifest).is_err());
 }
+
+// --- Claude background shells and monitors ---
+
+fn claude_background_screen(footer: &str) -> String {
+    format!(
+        "✻ Sautéed for 10s\n\n\
+         ────────────────────────────────────────────────────────────────\n\
+         ❯\n\
+         ────────────────────────────────────────────────────────────────\n\
+         {footer}\n"
+    )
+}
+
+fn assert_claude_background_working(footer: &str) {
+    with_manifest_dirs("claude-background", || {
+        let result = explain(Agent::Claude, &claude_background_screen(footer));
+        assert_eq!(result.state, AgentState::Working, "footer: {footer}");
+        assert_eq!(
+            result.matched_rule.as_ref().map(|rule| rule.id.as_str()),
+            Some("background_shell_working"),
+            "footer: {footer}"
+        );
+        assert!(result.visible_working);
+    });
+}
+
+#[test]
+fn claude_idle_prompt_with_background_shell_is_working() {
+    assert_claude_background_working("  ⏵⏵ auto mode on · 1 shell · ← for agents       /rc");
+    assert_claude_background_working("  ⏵⏵ auto mode on · 3 shells");
+}
+
+#[test]
+fn claude_idle_prompt_with_shells_and_monitors_is_working() {
+    assert_claude_background_working("  ⏵⏵ auto mode on · 2 shells, 1 monitor · ← for agents");
+    assert_claude_background_working("  ⏵⏵ auto mode on · 1 shell, 2 monitors");
+}
+
+#[test]
+fn claude_idle_prompt_with_monitor_only_is_working() {
+    assert_claude_background_working("  ⏵⏵ auto mode on · 1 monitor · ← for agents");
+    assert_claude_background_working("  ⏸ plan mode on · 2 monitors");
+}
+
+#[test]
+fn claude_shell_still_running_status_is_working() {
+    with_manifest_dirs("claude-shell-still-running", || {
+        let screen = concat!(
+            "✻ Sautéed for 10s · 1 shell still running\n\n",
+            "────────────────────────────────────────────────────────────────\n",
+            "❯\n",
+            "────────────────────────────────────────────────────────────────\n",
+            "  ⏵⏵ auto mode on\n",
+        );
+        let result = explain(Agent::Claude, screen);
+        assert_eq!(result.state, AgentState::Working);
+        assert!(result.visible_working);
+        assert_eq!(
+            result.matched_rule.as_ref().map(|rule| rule.id.as_str()),
+            Some("background_shell_working")
+        );
+    });
+}
+
+#[test]
+fn claude_idle_prompt_with_monitors_and_agents_footer_is_working() {
+    with_manifest_dirs("claude-monitors-agents-footer", || {
+        // Footer captured from a live Claude Code pane with three monitors and two agents.
+        let screen = concat!(
+            "────────────────────────────────────────────────────────────────\n",
+            "❯\n",
+            "────────────────────────────────────────────────────────────────\n",
+            "\n",
+            "  ⏵⏵ bypass permissions on · 3 monitors · ← 2 agents\n",
+        );
+        let result = explain(Agent::Claude, screen);
+        assert_eq!(result.state, AgentState::Working);
+        assert_eq!(
+            result.matched_rule.as_ref().map(|rule| rule.id.as_str()),
+            Some("background_shell_working")
+        );
+    });
+}
+
+#[test]
+fn claude_indented_prompt_text_cannot_fake_a_still_running_status() {
+    with_manifest_dirs("claude-typed-still-running", || {
+        let screen = concat!(
+            "────────────────────────────────────────────────────────────────\n",
+            "❯ note\n",
+            "  * x · 1 shell still running\n",
+            "────────────────────────────────────────────────────────────────\n",
+            "  ⏵⏵ auto mode on · ← for agents\n",
+        );
+        let result = explain(Agent::Claude, screen);
+        assert_eq!(result.state, AgentState::Idle);
+        assert!(!result.visible_working);
+    });
+}
+
+#[test]
+fn claude_idle_prompt_without_background_work_stays_idle() {
+    with_manifest_dirs("claude-no-background", || {
+        let result = explain(
+            Agent::Claude,
+            &claude_background_screen("  ⏵⏵ auto mode on · ← for agents"),
+        );
+        assert_eq!(result.state, AgentState::Idle);
+        assert!(result.visible_idle);
+        assert!(!result.visible_working);
+    });
+}
+
+#[test]
+fn claude_blocker_with_background_shell_remains_blocked() {
+    with_manifest_dirs("claude-blocker-background", || {
+        let screen = concat!(
+            "do you want to proceed?\n",
+            "bash command: rm -rf /tmp/test\n",
+            "❯ 1. Yes\n",
+            "  2. No\n\n",
+            "Esc to cancel · Tab to amend · ctrl+e to explain\n",
+            "  ⏵⏵ auto mode on · 1 shell · ← for agents\n",
+        );
+        let result = explain(Agent::Claude, screen);
+        assert_eq!(result.state, AgentState::Blocked);
+        assert_eq!(
+            result.matched_rule.as_ref().map(|rule| rule.id.as_str()),
+            Some("bash_permission_prompt")
+        );
+        assert!(result.visible_blocker);
+        assert!(!result.visible_working);
+    });
+}
