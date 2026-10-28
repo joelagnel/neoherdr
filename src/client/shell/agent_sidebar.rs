@@ -38,10 +38,12 @@ pub(super) fn ordered_agent_pane_ids(
     if sort == crate::config::AgentPanelSortConfig::Priority {
         agents.sort_by_key(|agent| {
             (
-                std::cmp::Reverse(status_priority(agent.agent_status)),
+                activity_key(snapshot, agent.agent_status, &agent.pane_id),
                 std::cmp::Reverse(agent.state_change_seq),
             )
         });
+    } else {
+        agents.sort_by_key(|agent| activity_key(snapshot, agent.agent_status, &agent.pane_id));
     }
     agents
         .into_iter()

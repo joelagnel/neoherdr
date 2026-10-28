@@ -164,8 +164,23 @@ fn sort_aggregate_rows(
         rows.sort_by_key(|row| {
             (
                 row.endpoint.stale(),
-                std::cmp::Reverse(status_priority(row.agent.agent_status)),
+                activity_key(
+                    row.endpoint.snapshot,
+                    row.agent.agent_status,
+                    &row.agent.pane_id,
+                ),
                 std::cmp::Reverse(row.recency),
+            )
+        });
+    } else {
+        rows.sort_by_key(|row| {
+            (
+                row.endpoint.stale(),
+                activity_key(
+                    row.endpoint.snapshot,
+                    row.agent.agent_status,
+                    &row.agent.pane_id,
+                ),
             )
         });
     }

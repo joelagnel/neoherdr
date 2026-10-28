@@ -109,10 +109,13 @@ pub(crate) fn render_tab_bar(
             } else {
                 base
             }
-        } else if tab.custom_label {
-            Style::default().fg(palette.overlay1).bg(palette.surface0)
         } else {
-            Style::default().fg(palette.overlay0).bg(palette.surface0)
+            let base = Style::default().fg(palette.subtext0).bg(palette.surface0);
+            if tab.custom_label {
+                base.add_modifier(Modifier::BOLD)
+            } else {
+                base
+            }
         };
         let padding = width.saturating_sub(display_width(&name));
         let left = padding / 2;

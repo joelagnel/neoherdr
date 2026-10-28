@@ -63,6 +63,7 @@ pub(super) fn snapshot() -> ClientShellSnapshot {
         }],
         agents: Vec::new(),
         commands: Vec::new(),
+        seen_order: Default::default(),
     }
 }
 
@@ -263,3 +264,4 @@ mod mouse_selection;
 mod popup_focus_projection;
 mod sidebar_buttons;
 mod startup_overlays;
+mod status_order;

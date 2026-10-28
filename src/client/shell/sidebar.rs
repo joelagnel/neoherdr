@@ -408,6 +408,7 @@ pub(crate) fn render_sidebar(
                 .get(entry.index)
                 .map(|workspace| {
                     workspace_rows(
+                        snapshot,
                         workspace,
                         displayed_workspace_status(snapshot, workspace, state.collapsed_groups),
                         entry.indented,
@@ -468,7 +469,7 @@ pub(crate) fn render_sidebar(
             continue;
         };
         let status = displayed_workspace_status(snapshot, workspace, state.collapsed_groups);
-        let rows = workspace_rows(workspace, status, entry.indented, &config.spaces);
+        let rows = workspace_rows(snapshot, workspace, status, entry.indented, &config.spaces);
         let row_height = (rows.len().max(1).min(u16::MAX as usize) as u16).min(body.height);
         if y.saturating_add(row_height) > body.bottom() {
             break;
@@ -485,6 +486,7 @@ pub(crate) fn render_sidebar(
         } else if workspace.focused {
             buffer.set_style(rect, Style::default().bg(palette.active_row_bg));
         }
+        let tab_position = workspace_tab_position(snapshot, workspace);
         render_workspace_rows(
             buffer,
             rect,
@@ -492,10 +494,13 @@ pub(crate) fn render_sidebar(
             config.status_indicators,
             entry,
             rows,
-            workspace.focused,
-            selected,
-            state.selected_workspace_id.is_some(),
-            dragged,
+            WorkspaceRowState {
+                focused: workspace.focused,
+                selected,
+                navigating: state.selected_workspace_id.is_some(),
+                dragged,
+            },
+            tab_position.as_deref(),
             palette,
         );
         let group_toggle = render_parent_group_toggle(
@@ -713,7 +718,36 @@ pub(crate) fn workspace_entries(
             });
         }
     }
-    entries
+    sort_entries_by_activity(snapshot, entries)
+}
+
+/// Moves busy spaces to the top. A worktree group (parent plus its indented
+/// children) moves as one block ranked by its busiest member; ties keep their
+/// existing order.
+fn sort_entries_by_activity(
+    snapshot: &ClientShellSnapshot,
+    entries: Vec<WorkspaceEntry>,
+) -> Vec<WorkspaceEntry> {
+    let rank = |entry: &WorkspaceEntry| {
+        let workspace = &snapshot.workspaces[entry.index];
+        activity_key(snapshot, workspace.agent_status, &workspace.workspace_id)
+    };
+    let mut blocks: Vec<Vec<WorkspaceEntry>> = Vec::new();
+    for entry in entries {
+        match blocks.last_mut() {
+            Some(block) if entry.indented => block.push(entry),
+            _ => blocks.push(vec![entry]),
+        }
+    }
+    for block in &mut blocks {
+        block[1..].sort_by_key(rank);
+        let last = block.len() - 1;
+        for (position, entry) in block.iter_mut().enumerate().skip(1) {
+            entry.last_child = position == last;
+        }
+    }
+    blocks.sort_by_key(|block| block.iter().map(rank).min());
+    blocks.into_iter().flatten().collect()
 }
 
 fn parent_group_key(snapshot: &ClientShellSnapshot, index: usize) -> Option<String> {
@@ -824,6 +858,7 @@ pub(in crate::client::shell) fn displayed_workspace_status(
 }
 
 pub(in crate::client::shell) fn workspace_rows(
+    snapshot: &ClientShellSnapshot,
     workspace: &ClientShellWorkspace,
     status: crate::api::schema::AgentStatus,
     indented: bool,
@@ -839,7 +874,7 @@ pub(in crate::client::shell) fn workspace_rows(
         &workspace.label
     };
     let token_values = workspace.tokens.iter().cloned().collect::<HashMap<_, _>>();
-    crate::ui::sidebar_space_rows(
+    let mut rows = crate::ui::sidebar_space_rows(
         config,
         crate::ui::SpaceTokenContext {
             workspace: label,
@@ -849,7 +884,61 @@ pub(in crate::client::shell) fn workspace_rows(
             tokens: &token_values,
             suppress_git_details: indented,
         },
-    )
+    );
+    add_active_tab_token(&mut rows, snapshot, workspace, config.rows.len());
+    rows
+}
+
+/// "N/M" for the workspace's active tab, shown at the right edge of its first row.
+pub(in crate::client::shell) fn workspace_tab_position(
+    snapshot: &ClientShellSnapshot,
+    workspace: &ClientShellWorkspace,
+) -> Option<String> {
+    let tabs = snapshot
+        .tabs
+        .iter()
+        .filter(|tab| tab.workspace_id == workspace.workspace_id)
+        .collect::<Vec<_>>();
+    let active = tabs
+        .iter()
+        .position(|tab| tab.tab_id == workspace.active_tab_id)?;
+    Some(format!("{}/{}", active + 1, tabs.len()))
+}
+
+/// Puts the active tab's bare name at the start of the second (detail) row.
+fn add_active_tab_token(
+    rows: &mut Vec<Vec<crate::ui::ResolvedToken>>,
+    snapshot: &ClientShellSnapshot,
+    workspace: &ClientShellWorkspace,
+    configured_rows: usize,
+) {
+    if configured_rows < 2 {
+        return;
+    }
+    let Some(tab) = snapshot
+        .tabs
+        .iter()
+        .find(|tab| tab.tab_id == workspace.active_tab_id)
+    else {
+        return;
+    };
+    let token = crate::ui::ResolvedToken {
+        kind: crate::ui::ResolvedTokenKind::Tab(tab.label.clone()),
+        style: Default::default(),
+    };
+    match rows.get_mut(1) {
+        Some(row) => row.insert(0, token),
+        None => rows.push(vec![token]),
+    }
+}
+
+/// How a workspace row is highlighted.
+#[derive(Clone, Copy)]
+pub(in crate::client::shell) struct WorkspaceRowState {
+    pub focused: bool,
+    pub selected: bool,
+    pub navigating: bool,
+    pub dragged: bool,
 }
 
 pub(in crate::client::shell) fn render_workspace_rows(
@@ -859,12 +948,16 @@ pub(in crate::client::shell) fn render_workspace_rows(
     indicators: crate::config::StatusIndicatorStyle,
     entry: &WorkspaceEntry,
     rows: Vec<Vec<crate::ui::ResolvedToken>>,
-    focused: bool,
-    selected: bool,
-    navigating: bool,
-    dragged: bool,
+    row_state: WorkspaceRowState,
+    tab_position: Option<&str>,
     palette: &Palette,
 ) {
+    let WorkspaceRowState {
+        focused,
+        selected,
+        navigating,
+        dragged,
+    } = row_state;
     for (row_index, row) in rows.iter().enumerate() {
         let y = area.y + row_index as u16;
         if y >= area.bottom() {
@@ -913,23 +1006,44 @@ pub(in crate::client::shell) fn render_workspace_rows(
         } else {
             palette.overlay0
         });
-        let spans = crate::ui::resolved_token_spans(
-            row,
-            (
-                status_icon(status, indicators),
+        let right = area.right().saturating_sub(2);
+        let render_spans = |width: u16| {
+            crate::ui::resolved_token_spans(
+                row,
+                (
+                    status_icon(status, indicators),
+                    Style::default().fg(status_color(status, palette)),
+                ),
                 Style::default().fg(status_color(status, palette)),
-            ),
-            Style::default().fg(status_color(status, palette)),
-            workspace_style,
-            secondary_style,
-            Style::default().fg(palette.overlay1),
-            palette,
-            area.right().saturating_sub(2).saturating_sub(x) as usize,
-        );
-        Paragraph::new(Line::from(spans)).render(
-            Rect::new(x, y, area.right().saturating_sub(2).saturating_sub(x), 1),
-            buffer,
-        );
+                workspace_style,
+                secondary_style,
+                Style::default().fg(palette.overlay1),
+                palette,
+                usize::from(width),
+            )
+        };
+        // The position only shows when the whole row still fits beside it.
+        let full = right.saturating_sub(x);
+        let position = tab_position.filter(|_| row_index == 0).filter(|text| {
+            let needed = render_spans(full)
+                .iter()
+                .map(|span| display_width(span.content.as_ref()))
+                .sum::<u16>();
+            needed + display_width(text) < full
+        });
+        let text_right =
+            position.map_or(right, |text| right.saturating_sub(display_width(text) + 1));
+        Paragraph::new(Line::from(render_spans(text_right.saturating_sub(x))))
+            .render(Rect::new(x, y, text_right.saturating_sub(x), 1), buffer);
+        if let Some(text) = position {
+            super::render::put_right_text(
+                buffer,
+                Rect::new(area.x, y, right.saturating_sub(area.x), 1),
+                y,
+                text,
+                Style::default().fg(palette.overlay0),
+            );
+        }
     }
 
     let background = if selected {
