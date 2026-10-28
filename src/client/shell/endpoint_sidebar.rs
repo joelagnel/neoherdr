@@ -214,23 +214,13 @@ pub(super) fn render_collapsed(
         config,
         hits,
     );
-    hits.sidebar_toggle = if area.is_empty() || workspace_area.width == 0 {
-        Rect::default()
-    } else {
-        Rect::new(
-            workspace_area.x + workspace_area.width / 2,
-            area.bottom().saturating_sub(1),
-            1,
-            1,
-        )
-    };
-    put_text(
+    super::sidebar::render_sidebar_expand_button(
         buffer,
-        hits.sidebar_toggle.x,
-        hits.sidebar_toggle.y,
-        hits.sidebar_toggle.width,
-        "»",
-        Style::default().fg(palette.overlay0),
+        area,
+        workspace_area,
+        false,
+        palette,
+        hits,
     );
 }
 
@@ -263,6 +253,16 @@ pub(super) fn render_expanded(
             .fg(palette.overlay0)
             .add_modifier(Modifier::BOLD),
     );
+    if config.mouse_capture {
+        super::sidebar::render_header_buttons(
+            buffer,
+            Rect::new(workspace_area.x, workspace_area.y, workspace_area.width, 1),
+            workspace_area.right(),
+            &super::sidebar::WORKSPACE_SCROLL_BUTTONS,
+            palette,
+            hits,
+        );
+    }
 
     let empty_collapsed_groups = HashSet::new();
 
@@ -555,7 +555,7 @@ pub(super) fn render_expanded(
     }
     super::endpoint_agents::render_expanded(
         buffer,
-        detail_area,
+        super::sidebar::reserve_collapse_button_row(detail_area),
         active_snapshot.and_then(|snapshot| snapshot.agent_view_label.as_deref()),
         state.endpoints,
         state.active_endpoint_id,
@@ -563,20 +563,7 @@ pub(super) fn render_expanded(
         state.agent_scroll,
         hits,
     );
-    hits.sidebar_toggle = Rect::new(
-        area.right().saturating_sub(2),
-        area.bottom().saturating_sub(1),
-        u16::from(area.width > 1),
-        u16::from(area.height > 0),
-    );
-    put_text(
-        buffer,
-        hits.sidebar_toggle.x,
-        hits.sidebar_toggle.y,
-        hits.sidebar_toggle.width,
-        "«",
-        Style::default().fg(palette.overlay0),
-    );
+    super::sidebar::render_sidebar_collapse_button(buffer, area, palette, hits);
 }
 
 fn active_endpoint_label<'a>(state: &'a ShellRenderState<'_>) -> &'a str {

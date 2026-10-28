@@ -87,6 +87,13 @@ pub(super) fn render_agent_panel(
     );
 }
 
+const AGENT_HEADER_BUTTONS: [(&str, SidebarButton); 4] = [
+    ("▲", SidebarButton::AgentUp),
+    ("▼", SidebarButton::AgentDown),
+    ("△", SidebarButton::SplitUp),
+    ("▽", SidebarButton::SplitDown),
+];
+
 pub(super) fn render_agent_panel_header(
     buffer: &mut Buffer,
     area: Rect,
@@ -148,6 +155,16 @@ pub(super) fn render_agent_panel_header(
             })
             .add_modifier(Modifier::BOLD),
     );
+    if config.mouse_capture {
+        super::sidebar::render_header_buttons(
+            buffer,
+            Rect::new(area.x, area.y + 1, area.width, 1),
+            sort_rect.x.saturating_sub(1),
+            &AGENT_HEADER_BUTTONS,
+            &config.palette,
+            hits,
+        );
+    }
     true
 }
 

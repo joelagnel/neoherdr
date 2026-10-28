@@ -365,7 +365,11 @@ fn sidebar_toggle_remains_clickable_with_overflowing_agents() {
 
             let toggle = state.hits.sidebar_toggle;
             let buffer = frame.to_ratatui_buffer().expect("sidebar buffer");
-            assert_eq!(buffer[(toggle.x, toggle.y)].symbol(), "«");
+            let label = (toggle.x..toggle.right())
+                .map(|x| buffer[(x, toggle.y)].symbol())
+                .collect::<String>();
+            assert!(label.contains("Collapse"), "labelled button, got {label:?}");
+            assert!(toggle.width >= 8 && toggle.right() < 100);
             let outcome = state.handle_raw_events(vec![RawInputEvent::Mouse(MouseEvent {
                 kind: MouseEventKind::Down(MouseButton::Left),
                 column: toggle.x,
@@ -381,6 +385,7 @@ fn sidebar_toggle_remains_clickable_with_overflowing_agents() {
             assert_eq!(state.agent_scroll, scroll);
             assert!(state.chrome_drag.is_none());
 
+            state.set_pane_surface(surface());
             state.compose(100, 28).expect("collapsed sidebar");
             let toggle = state.hits.sidebar_toggle;
             let outcome = state.handle_raw_events(vec![RawInputEvent::Mouse(MouseEvent {
