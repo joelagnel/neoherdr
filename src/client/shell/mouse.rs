@@ -21,6 +21,41 @@ impl ClientShellState {
         }
     }
 
+    fn press_sidebar_button(&mut self, button: SidebarButton, outcome: &mut ClientShellInput) {
+        const SCROLL_STEP: usize = 3;
+        const SPLIT_STEP: f32 = 0.05;
+        let scroll = |current: usize, max: usize, down: bool| {
+            if down {
+                current.saturating_add(SCROLL_STEP).min(max)
+            } else {
+                current.saturating_sub(SCROLL_STEP)
+            }
+        };
+        match button {
+            SidebarButton::WorkspaceUp | SidebarButton::WorkspaceDown => {
+                let down = button == SidebarButton::WorkspaceDown;
+                self.workspace_scroll =
+                    scroll(self.workspace_scroll, self.hits.workspace_max_scroll, down);
+            }
+            SidebarButton::AgentUp | SidebarButton::AgentDown => {
+                let down = button == SidebarButton::AgentDown;
+                self.agent_scroll = scroll(self.agent_scroll, self.hits.agent_max_scroll, down);
+            }
+            SidebarButton::SplitUp | SidebarButton::SplitDown => {
+                let delta = if button == SidebarButton::SplitDown {
+                    SPLIT_STEP
+                } else {
+                    -SPLIT_STEP
+                };
+                self.sidebar_section_split = (self.sidebar_section_split + delta).clamp(0.1, 0.9);
+                self.sidebar_section_split_manual = true;
+                self.persist_chrome_preferences(outcome);
+            }
+            SidebarButton::Find => self.open_search_overlay(),
+        }
+        outcome.repaint = true;
+    }
+
     fn set_sidebar_section_from_row(&mut self, row: u16, outcome: &mut ClientShellInput) {
         let divider = self.hits.sidebar_divider;
         if divider.height == 0 {
@@ -511,7 +546,7 @@ impl ClientShellState {
     fn workspace_drop_target_at(&self, point: (u16, u16)) -> Option<(Option<String>, u16)> {
         if self.hits.workspace_body.height == 0
             || point.1 < self.hits.workspace_body.y.saturating_sub(1)
-            || point.1 >= self.hits.new_workspace.y
+            || point.1 >= self.hits.workspace_body.bottom()
             || self.hits.workspaces.iter().any(|hit| {
                 hit.endpoint_id != self.active_endpoint_id && super::contains(hit.rect, point)
             })
@@ -573,7 +608,7 @@ impl ClientShellState {
                     .map(|workspace| workspace.workspace_id.clone())
             });
             let row = last_hit.rect.bottom();
-            if row < self.hits.new_workspace.y {
+            if row < self.hits.workspace_body.bottom() {
                 slots.push((before, row));
             }
         }
@@ -1940,7 +1975,17 @@ impl ClientShellState {
                 self.workspace_press = None;
                 self.tab_press = None;
                 self.chrome_drag = None;
-                // The toggle is painted over the agent scrollbar's last cell.
+                if let Some(button) = self
+                    .hits
+                    .sidebar_buttons
+                    .iter()
+                    .find(|(rect, _)| super::contains(*rect, point))
+                    .map(|(_, button)| *button)
+                {
+                    self.press_sidebar_button(button, outcome);
+                    return;
+                }
+                // The toggle button owns its row, so it wins over scrollbar and divider clicks.
                 if super::contains(self.hits.sidebar_toggle, point) {
                     self.toggle_sidebar_collapsed(outcome);
                     return;

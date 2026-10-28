@@ -81,6 +81,17 @@ pub(super) enum ClientMobileTarget {
     Menu(usize),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum SidebarButton {
+    WorkspaceUp,
+    WorkspaceDown,
+    AgentUp,
+    AgentDown,
+    SplitUp,
+    SplitDown,
+    Find,
+}
+
 #[derive(Default)]
 pub(super) struct ShellHitMap {
     pub(super) machines: Vec<MachineHit>,
@@ -103,6 +114,7 @@ pub(super) struct ShellHitMap {
     pub(super) sidebar_divider: Rect,
     pub(super) sidebar_section_divider: Rect,
     pub(super) sidebar_toggle: Rect,
+    pub(super) sidebar_buttons: Vec<(Rect, SidebarButton)>,
     pub(super) new_workspace: Rect,
     pub(super) new_tab: Rect,
     pub(super) tab_scroll_left: Rect,

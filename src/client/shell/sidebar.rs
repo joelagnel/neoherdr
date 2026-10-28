@@ -1,3 +1,4 @@
+use super::render::{display_width, put_text};
 use super::*;
 use ratatui::{
     text::Line,
@@ -22,6 +23,172 @@ pub(in crate::client::shell) fn workspace_active_background(
     } else {
         palette.active_row_bg
     }
+}
+
+const SIDEBAR_COLLAPSE_WIDTH: u16 = 12;
+const SIDEBAR_FIND_MIN_WIDTH: u16 = 6;
+const HEADER_BUTTON_WIDTH: u16 = 2;
+const HEADER_TITLE_WIDTH: u16 = 8;
+
+fn sidebar_button_background(palette: &Palette) -> ratatui::style::Color {
+    if palette.surface0 == ratatui::style::Color::Reset {
+        palette.active_row_bg
+    } else {
+        palette.surface0
+    }
+}
+
+/// Draws the "« Collapse" and "Find" buttons on the bottom row of an expanded sidebar.
+pub(in crate::client::shell) fn render_sidebar_collapse_button(
+    buffer: &mut Buffer,
+    area: Rect,
+    palette: &Palette,
+    hits: &mut ShellHitMap,
+) {
+    hits.sidebar_toggle = Rect::default();
+    if area.width < 8 || area.height < 4 {
+        return;
+    }
+    let available = area.width.saturating_sub(3);
+    let collapse_width = if available >= SIDEBAR_COLLAPSE_WIDTH + 1 + SIDEBAR_FIND_MIN_WIDTH {
+        SIDEBAR_COLLAPSE_WIDTH
+    } else {
+        available.min(16)
+    };
+    let y = area.bottom() - 1;
+    hits.sidebar_toggle = Rect::new(area.x + 1, y, collapse_width, 1);
+    render_sidebar_button(buffer, hits.sidebar_toggle, "« Collapse", palette);
+    let find_x = hits.sidebar_toggle.right() + 1;
+    let find_width = (area.x + 1 + available).saturating_sub(find_x).min(8);
+    if find_width >= SIDEBAR_FIND_MIN_WIDTH {
+        let find = Rect::new(find_x, y, find_width, 1);
+        render_sidebar_button(buffer, find, "Find", palette);
+        hits.sidebar_buttons.push((find, SidebarButton::Find));
+    }
+}
+
+fn render_sidebar_button(buffer: &mut Buffer, button: Rect, label: &str, palette: &Palette) {
+    let style = Style::default()
+        .fg(palette.text)
+        .bg(sidebar_button_background(palette))
+        .add_modifier(Modifier::BOLD);
+    buffer.set_style(button, style);
+    put_text(
+        buffer,
+        button.x + button.width.saturating_sub(display_width(label)) / 2,
+        button.y,
+        button.width,
+        label,
+        style,
+    );
+}
+
+/// Draws small glyph buttons right-aligned so the last one ends at `end_x`.
+/// Skipped when the title on the left would be crowded out.
+pub(in crate::client::shell) fn render_header_buttons(
+    buffer: &mut Buffer,
+    row: Rect,
+    end_x: u16,
+    buttons: &[(&str, SidebarButton)],
+    palette: &Palette,
+    hits: &mut ShellHitMap,
+) {
+    let width = HEADER_BUTTON_WIDTH * buttons.len() as u16;
+    let start = end_x.saturating_sub(width);
+    if end_x > row.right() || start < row.x + HEADER_TITLE_WIDTH {
+        return;
+    }
+    for (index, (glyph, button)) in buttons.iter().enumerate() {
+        let rect = Rect::new(
+            start + HEADER_BUTTON_WIDTH * index as u16,
+            row.y,
+            HEADER_BUTTON_WIDTH,
+            1,
+        );
+        put_text(
+            buffer,
+            rect.x,
+            rect.y,
+            1,
+            glyph,
+            Style::default()
+                .fg(palette.text)
+                .add_modifier(Modifier::BOLD),
+        );
+        hits.sidebar_buttons.push((rect, *button));
+    }
+}
+
+/// Draws "+ new" on the spaces title row, left of the scroll buttons. Returns false
+/// (leaving the footer button in charge) when the row is too narrow for it.
+fn render_new_workspace_header_button(
+    buffer: &mut Buffer,
+    header: Rect,
+    palette: &Palette,
+    hits: &mut ShellHitMap,
+) -> bool {
+    const LABEL: &str = "+ new";
+    let width = display_width(LABEL);
+    let buttons = HEADER_BUTTON_WIDTH * WORKSPACE_SCROLL_BUTTONS.len() as u16;
+    let x = header.right().saturating_sub(buttons + 1 + width);
+    if header.right() < buttons + 1 + width || x < header.x + HEADER_TITLE_WIDTH {
+        return false;
+    }
+    let rect = Rect::new(x, header.y, width, 1);
+    put_text(
+        buffer,
+        rect.x,
+        rect.y,
+        rect.width,
+        LABEL,
+        Style::default()
+            .fg(palette.accent)
+            .add_modifier(Modifier::BOLD),
+    );
+    hits.new_workspace = rect;
+    true
+}
+
+pub(in crate::client::shell) const WORKSPACE_SCROLL_BUTTONS: [(&str, SidebarButton); 2] = [
+    ("▲", SidebarButton::WorkspaceUp),
+    ("▼", SidebarButton::WorkspaceDown),
+];
+
+/// Draws the expand button on the bottom row of the compact collapsed sidebar.
+pub(in crate::client::shell) fn render_sidebar_expand_button(
+    buffer: &mut Buffer,
+    area: Rect,
+    workspace_area: Rect,
+    attention: bool,
+    palette: &Palette,
+    hits: &mut ShellHitMap,
+) {
+    hits.sidebar_toggle = if area.is_empty() || workspace_area.width == 0 {
+        Rect::default()
+    } else {
+        // Short sidebars have no agent section, so the last row is a workspace row:
+        // keep that row clickable by covering a single cell there.
+        let (x, width) = if area.height < 7 {
+            (workspace_area.x + workspace_area.width / 2, 1)
+        } else {
+            (workspace_area.x, workspace_area.width.min(3))
+        };
+        Rect::new(x, area.bottom().saturating_sub(1), width, 1)
+    };
+    let button = hits.sidebar_toggle;
+    if button.is_empty() {
+        return;
+    }
+    let style = Style::default()
+        .fg(if attention {
+            palette.accent
+        } else {
+            palette.text
+        })
+        .bg(sidebar_button_background(palette))
+        .add_modifier(Modifier::BOLD);
+    buffer.set_style(button, style);
+    put_text(buffer, button.x + button.width / 2, button.y, 1, "»", style);
 }
 
 pub(in crate::client::shell) fn collapsed_sidebar_sections(
@@ -170,29 +337,13 @@ pub(crate) fn render_collapsed_sidebar(
         );
         hits.agents.push((rect, pane_id));
     }
-    hits.sidebar_toggle = if area.is_empty() || workspace_area.width == 0 {
-        Rect::default()
-    } else {
-        Rect::new(
-            workspace_area.x + workspace_area.width / 2,
-            area.bottom().saturating_sub(1),
-            1,
-            1,
-        )
-    };
-    put_text(
+    render_sidebar_expand_button(
         buffer,
-        hits.sidebar_toggle.x,
-        hits.sidebar_toggle.y,
-        hits.sidebar_toggle.width,
-        "»",
-        if super::super::global_menu::global_menu_attention(snapshot) {
-            Style::default()
-                .fg(palette.accent)
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(palette.overlay0)
-        },
+        area,
+        workspace_area,
+        super::super::global_menu::global_menu_attention(snapshot),
+        palette,
+        hits,
     );
 }
 
@@ -225,6 +376,19 @@ pub(crate) fn render_sidebar(
             .fg(palette.overlay0)
             .add_modifier(Modifier::BOLD),
     );
+    let mut new_in_header = false;
+    if config.mouse_capture {
+        let header = Rect::new(workspace_area.x, workspace_area.y, workspace_area.width, 1);
+        render_header_buttons(
+            buffer,
+            header,
+            workspace_area.right(),
+            &WORKSPACE_SCROLL_BUTTONS,
+            palette,
+            hits,
+        );
+        new_in_header = render_new_workspace_header_button(buffer, header, palette, hits);
+    }
 
     let entries = workspace_entries(snapshot, state.collapsed_groups);
     let body = Rect::new(
@@ -377,20 +541,22 @@ pub(crate) fn render_sidebar(
 
     let footer_y = workspace_area.bottom().saturating_sub(1);
     if config.mouse_capture {
-        hits.new_workspace = Rect::new(
-            workspace_area.x,
-            footer_y,
-            5.min(workspace_area.width),
-            u16::from(workspace_area.height > 0),
-        );
-        put_text(
-            buffer,
-            workspace_area.x,
-            footer_y,
-            workspace_area.width,
-            " new",
-            Style::default().fg(palette.overlay0),
-        );
+        if !new_in_header {
+            hits.new_workspace = Rect::new(
+                workspace_area.x,
+                footer_y,
+                5.min(workspace_area.width),
+                u16::from(workspace_area.height > 0),
+            );
+            put_text(
+                buffer,
+                workspace_area.x,
+                footer_y,
+                workspace_area.width,
+                " new",
+                Style::default().fg(palette.overlay0),
+            );
+        }
         let attention = super::super::global_menu::global_menu_attention(snapshot);
         let launcher_width = if attention { 8 } else { 6 }.min(workspace_area.width);
         hits.global_launcher = Rect::new(
@@ -432,27 +598,24 @@ pub(crate) fn render_sidebar(
 
     super::render_agent_panel(
         buffer,
-        detail_area,
+        reserve_collapse_button_row(detail_area),
         snapshot,
         config,
         state.agent_scroll,
         hits,
     );
 
-    hits.sidebar_toggle = Rect::new(
-        area.right().saturating_sub(2),
-        area.bottom().saturating_sub(1),
-        u16::from(area.width > 1),
-        u16::from(area.height > 0),
-    );
-    put_text(
-        buffer,
-        hits.sidebar_toggle.x,
-        hits.sidebar_toggle.y,
-        hits.sidebar_toggle.width,
-        "«",
-        Style::default().fg(palette.overlay0),
-    );
+    render_sidebar_collapse_button(buffer, area, palette, hits);
+}
+
+/// Leaves the last row of the agent section free for the collapse button.
+pub(in crate::client::shell) fn reserve_collapse_button_row(detail_area: Rect) -> Rect {
+    Rect::new(
+        detail_area.x,
+        detail_area.y,
+        detail_area.width,
+        detail_area.height.saturating_sub(1),
+    )
 }
 
 pub(crate) fn workspace_entries(
