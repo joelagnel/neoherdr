@@ -10,6 +10,9 @@ use super::render::{display_width, put_segment, put_text};
 use super::*;
 
 const MOBILE_BUTTON_WIDTH: u16 = 10;
+const MOBILE_FIND_WIDTH: u16 = 8;
+const MOBILE_MIN_STATUS_WIDTH: u16 = 12;
+const MOBILE_SWITCHER_TITLE_WIDTH: u16 = 8;
 
 struct MobileItem {
     lines: Vec<Line<'static>>,
@@ -67,10 +70,35 @@ pub(super) fn render_mobile_header(
         area.height,
     );
     hits.mobile_switch = button;
-    let status_width = button.x.saturating_sub(area.x).saturating_sub(1);
+    let mut left = button.x;
+    let find =
+        (left.saturating_sub(area.x) >= MOBILE_FIND_WIDTH + MOBILE_MIN_STATUS_WIDTH).then(|| {
+            left -= MOBILE_FIND_WIDTH;
+            Rect::new(left, area.y, MOBILE_FIND_WIDTH, area.height)
+        });
+    hits.mobile_find = find.unwrap_or_default();
+    let status_width = left.saturating_sub(area.x).saturating_sub(1);
     let status = Rect::new(area.x, area.y, status_width, area.height);
     render_header_status(buffer, status, snapshot, config);
-    render_header_button(buffer, button, snapshot, config);
+    render_header_button(buffer, find.unwrap_or_default(), "Find", palette);
+    render_header_button(buffer, button, "switch", palette);
+    if snapshot
+        .agents
+        .iter()
+        .any(|agent| agent.agent_status == crate::api::schema::AgentStatus::Blocked)
+    {
+        put_text(
+            buffer,
+            button.right().saturating_sub(1),
+            button.y,
+            1,
+            status_icon(
+                crate::api::schema::AgentStatus::Blocked,
+                config.status_indicators,
+            ),
+            Style::default().fg(palette.red).bg(palette.surface0),
+        );
+    }
 }
 
 fn render_header_status(
@@ -144,16 +172,10 @@ fn render_header_status(
     }
 }
 
-fn render_header_button(
-    buffer: &mut Buffer,
-    area: Rect,
-    snapshot: &ClientShellSnapshot,
-    config: &ClientShellConfig,
-) {
+fn render_header_button(buffer: &mut Buffer, area: Rect, label: &str, palette: &Palette) {
     if area.is_empty() {
         return;
     }
-    let palette = &config.palette;
     buffer.set_style(area, Style::default().bg(palette.surface0));
     for y in area.y..area.bottom() {
         put_text(
@@ -168,7 +190,6 @@ fn render_header_button(
         );
     }
     let label_y = if area.height > 1 { area.y + 1 } else { area.y };
-    let label = "switch";
     let label_width = display_width(label);
     put_text(
         buffer,
@@ -183,23 +204,6 @@ fn render_header_button(
             .bg(palette.surface0)
             .add_modifier(Modifier::BOLD),
     );
-    if snapshot
-        .agents
-        .iter()
-        .any(|agent| agent.agent_status == crate::api::schema::AgentStatus::Blocked)
-    {
-        put_text(
-            buffer,
-            area.right().saturating_sub(1),
-            area.y,
-            1,
-            status_icon(
-                crate::api::schema::AgentStatus::Blocked,
-                config.status_indicators,
-            ),
-            Style::default().fg(palette.red).bg(palette.surface0),
-        );
-    }
 }
 
 fn mobile_endpoint_state(status: ClientEndpointStatus) -> &'static str {
@@ -402,11 +406,22 @@ pub(super) fn render_mobile_switcher(
         header_height,
     );
     hits.mobile_close = close;
+    let find = (close.x.saturating_sub(area.x) >= MOBILE_FIND_WIDTH + MOBILE_SWITCHER_TITLE_WIDTH)
+        .then(|| {
+            Rect::new(
+                close.x - MOBILE_FIND_WIDTH,
+                area.y,
+                MOBILE_FIND_WIDTH,
+                header_height,
+            )
+        });
+    hits.mobile_find = find.unwrap_or_default();
+    render_header_button(buffer, find.unwrap_or_default(), "Find", palette);
     put_text(
         buffer,
         area.x,
         area.y,
-        close.x.saturating_sub(area.x),
+        find.map_or(close.x, |find| find.x).saturating_sub(area.x),
         " switch",
         Style::default()
             .fg(palette.text)
@@ -960,17 +975,24 @@ impl ClientShellState {
         use crossterm::event::{MouseButton, MouseEventKind};
         let point = (mouse.column, mouse.row);
         if self.mode != ClientShellMode::Navigate {
-            if matches!(
+            if !matches!(
                 self.mode,
                 ClientShellMode::Terminal | ClientShellMode::Resize
-            ) && mouse.kind == MouseEventKind::Down(MouseButton::Left)
-                && super::contains(self.hits.mobile_switch, point)
+            ) || mouse.kind != MouseEventKind::Down(MouseButton::Left)
             {
+                return false;
+            }
+            if super::contains(self.hits.mobile_switch, point) {
                 self.mobile_switcher_scroll = 0;
                 self.reveal_mobile_workspace = false;
                 self.pending_workspace_highlight = None;
                 self.mode = ClientShellMode::Navigate;
                 self.navigate_workspace_id = self.focused_navigation_target();
+                outcome.repaint = true;
+                return true;
+            }
+            if super::contains(self.hits.mobile_find, point) {
+                self.open_search_overlay();
                 outcome.repaint = true;
                 return true;
             }
@@ -995,6 +1017,12 @@ impl ClientShellState {
             _ => return true,
         }
 
+        if super::contains(self.hits.mobile_find, point) {
+            self.mobile_switcher_suspended = true;
+            self.open_search_overlay();
+            outcome.repaint = true;
+            return true;
+        }
         if super::contains(self.hits.mobile_close, point) {
             self.mode = ClientShellMode::Terminal;
             self.navigate_workspace_id = None;

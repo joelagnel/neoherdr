@@ -11,13 +11,7 @@ impl ClientShellState {
                 outcome.detach = true;
             }
             crate::input::KeybindMatch::Action(crate::input::KeybindAction::ToggleSidebar) => {
-                self.sidebar_collapsed = !self.sidebar_collapsed;
-                self.sidebar_collapsed_manual = true;
-                self.reveal_navigation_workspace = true;
-                self.invalidate_pane_surface();
-                outcome.repaint = true;
-                outcome.resize = true;
-                self.persist_chrome_preferences(outcome);
+                self.toggle_sidebar_collapsed(outcome);
             }
             crate::input::KeybindMatch::Action(action) => {
                 if self.workspace_preview_action_blocked()
