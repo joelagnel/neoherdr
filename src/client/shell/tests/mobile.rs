@@ -218,7 +218,8 @@ fn mobile_header_and_switcher_render_released_sections_and_stable_targets() {
         .iter()
         .map(|cell| cell.symbol.as_str())
         .collect::<String>();
-    assert!(header_text.contains("client-shell"));
+    // Find shares the header with the status, so the workspace name is truncated here.
+    assert!(header_text.contains("clie"));
     assert!(header_text.contains("tab 1"));
     assert!(header_text.contains("blocked"));
     assert!(header_text.contains("switch"));
@@ -682,6 +683,28 @@ fn mobile_row_text(frame: &FrameData, row: u16) -> String {
         .collect()
 }
 
+fn type_text(state: &mut ClientShellState, text: &str) {
+    let events = text
+        .chars()
+        .map(|ch| {
+            RawInputEvent::Key(crate::input::TerminalKey::new(
+                KeyCode::Char(ch),
+                KeyModifiers::empty(),
+            ))
+        })
+        .collect();
+    state.handle_raw_events(events);
+}
+
+fn mobile_click(rect: Rect) -> RawInputEvent {
+    RawInputEvent::Mouse(crossterm::event::MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: rect.x,
+        row: rect.y,
+        modifiers: KeyModifiers::empty(),
+    })
+}
+
 #[test]
 fn mobile_switcher_lists_spaces_before_agents() {
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
@@ -726,5 +749,84 @@ fn mobile_switcher_lists_spaces_before_agents() {
     assert!(
         hit_y(|target| matches!(target, ClientMobileTarget::Workspace { .. }))
             < hit_y(|target| matches!(target, ClientMobileTarget::Agent { .. }))
+    );
+}
+
+#[test]
+fn mobile_header_has_find_and_switch_but_no_collapse_button() {
+    for sidebar_collapsed in [false, true] {
+        let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+        state.set_snapshot(Box::new(snapshot()));
+        state.set_pane_surface(surface());
+        state.sidebar_collapsed = sidebar_collapsed;
+        let frame = state.compose(60, 20).expect("mobile header");
+        let header = format!(
+            "{}{}",
+            mobile_row_text(&frame, 0),
+            mobile_row_text(&frame, 1)
+        );
+        for label in ["Find", "switch"] {
+            assert!(header.contains(label), "missing {label}");
+        }
+        for label in ["Collapse", "Expand"] {
+            assert!(
+                !header.contains(label),
+                "{label} does nothing visible on mobile"
+            );
+        }
+        let (find, switch) = (state.hits.mobile_find, state.hits.mobile_switch);
+        assert!(!find.is_empty() && !switch.is_empty());
+        assert_eq!(switch.right(), 60);
+        assert_eq!(find.right(), switch.x);
+    }
+}
+
+#[test]
+fn mobile_find_stays_visible_whenever_it_fits() {
+    for cols in 30..=64u16 {
+        let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+        state.set_snapshot(Box::new(snapshot()));
+        state.set_pane_surface(surface());
+        state.compose(cols, 20).expect("mobile header");
+        assert!(
+            !state.hits.mobile_find.is_empty(),
+            "Find missing at {cols} columns"
+        );
+    }
+}
+
+#[test]
+fn mobile_find_button_opens_live_filtering_search() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+    state.compose(60, 24).expect("mobile header");
+    let outcome = state.handle_raw_events(vec![mobile_click(state.hits.mobile_find)]);
+    assert!(outcome.repaint);
+    let Some(ClientShellOverlay::Navigator(navigator)) = state.overlay.as_ref() else {
+        panic!("search must open the navigator overlay");
+    };
+    assert!(navigator.search_focused);
+    type_text(&mut state, "client");
+    let frame = state.compose(60, 24).expect("search frame");
+    // Rows 0-1 are the mobile header, which always shows the workspace name.
+    let text = (2..frame.height)
+        .map(|row| mobile_row_text(&frame, row))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(text.contains("/ client"), "typed query must be visible");
+    assert!(
+        text.contains("client-shell"),
+        "matching space must be listed as you type"
+    );
+    type_text(&mut state, "zzzz");
+    let frame = state.compose(60, 24).expect("search frame");
+    let text = (0..frame.height)
+        .map(|row| mobile_row_text(&frame, row))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        !text.contains("client-shell ·"),
+        "non-matching rows disappear"
     );
 }

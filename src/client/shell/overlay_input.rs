@@ -207,6 +207,25 @@ impl ClientShellState {
         self.overlay = Some(ClientShellOverlay::Navigator(navigator));
     }
 
+    pub(super) fn open_search_overlay(&mut self) {
+        self.open_navigator_overlay();
+        if let Some(ClientShellOverlay::Navigator(navigator)) = self.overlay.as_mut() {
+            navigator.search_focused = true;
+        }
+    }
+
+    pub(super) fn toggle_sidebar_collapsed(&mut self, outcome: &mut ClientShellInput) {
+        self.sidebar_collapsed = !self.sidebar_collapsed;
+        self.sidebar_collapsed_manual = true;
+        self.reveal_navigation_workspace = true;
+        if !self.mobile_layout_active() {
+            self.invalidate_pane_surface();
+            outcome.resize = true;
+        }
+        outcome.repaint = true;
+        self.persist_chrome_preferences(outcome);
+    }
+
     pub(super) fn move_navigator_selection(&mut self, delta: isize) {
         let Some(ClientShellOverlay::Navigator(navigator)) = self.overlay.as_mut() else {
             return;
