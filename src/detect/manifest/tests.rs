@@ -907,3 +907,343 @@ contains = ["active"]
 "#;
     assert!(parse_manifest(manifest).is_err());
 }
+
+// --- Claude background shells and monitors ---
+
+fn claude_background_screen(footer: &str) -> String {
+    format!(
+        "✻ Sautéed for 10s\n\n\
+         ────────────────────────────────────────────────────────────────\n\
+         ❯\n\
+         ────────────────────────────────────────────────────────────────\n\
+         {footer}\n"
+    )
+}
+
+fn assert_claude_background_working(footer: &str) {
+    with_manifest_dirs("claude-background", || {
+        let result = explain(Agent::Claude, &claude_background_screen(footer));
+        assert_eq!(result.state, AgentState::Working, "footer: {footer}");
+        assert_eq!(
+            result.matched_rule.as_ref().map(|rule| rule.id.as_str()),
+            Some("background_shell_working"),
+            "footer: {footer}"
+        );
+        assert!(result.visible_working);
+    });
+}
+
+#[test]
+fn claude_idle_prompt_with_background_shell_is_working() {
+    assert_claude_background_working("  ⏵⏵ auto mode on · 1 shell · ← for agents       /rc");
+    assert_claude_background_working("  ⏵⏵ auto mode on · 3 shells");
+}
+
+#[test]
+fn claude_idle_prompt_with_shells_and_monitors_is_working() {
+    assert_claude_background_working("  ⏵⏵ auto mode on · 2 shells, 1 monitor · ← for agents");
+    assert_claude_background_working("  ⏵⏵ auto mode on · 1 shell, 2 monitors");
+}
+
+#[test]
+fn claude_idle_prompt_with_monitor_only_is_working() {
+    assert_claude_background_working("  ⏵⏵ auto mode on · 1 monitor · ← for agents");
+    assert_claude_background_working("  ⏸ plan mode on · 2 monitors");
+}
+
+#[test]
+fn claude_shell_still_running_status_is_working() {
+    with_manifest_dirs("claude-shell-still-running", || {
+        let screen = concat!(
+            "✻ Sautéed for 10s · 1 shell still running\n\n",
+            "────────────────────────────────────────────────────────────────\n",
+            "❯\n",
+            "────────────────────────────────────────────────────────────────\n",
+            "  ⏵⏵ auto mode on\n",
+        );
+        let result = explain(Agent::Claude, screen);
+        assert_eq!(result.state, AgentState::Working);
+        assert!(result.visible_working);
+        assert_eq!(
+            result.matched_rule.as_ref().map(|rule| rule.id.as_str()),
+            Some("background_shell_working")
+        );
+    });
+}
+
+#[test]
+fn claude_idle_prompt_with_monitors_and_agents_footer_is_working() {
+    with_manifest_dirs("claude-monitors-agents-footer", || {
+        // Footer captured from a live Claude Code pane with three monitors and two agents.
+        let screen = concat!(
+            "────────────────────────────────────────────────────────────────\n",
+            "❯\n",
+            "────────────────────────────────────────────────────────────────\n",
+            "\n",
+            "  ⏵⏵ bypass permissions on · 3 monitors · ← 2 agents\n",
+        );
+        let result = explain(Agent::Claude, screen);
+        assert_eq!(result.state, AgentState::Working);
+        assert_eq!(
+            result.matched_rule.as_ref().map(|rule| rule.id.as_str()),
+            Some("background_shell_working")
+        );
+    });
+}
+
+#[test]
+fn claude_indented_prompt_text_cannot_fake_a_still_running_status() {
+    with_manifest_dirs("claude-typed-still-running", || {
+        let screen = concat!(
+            "────────────────────────────────────────────────────────────────\n",
+            "❯ note\n",
+            "  * x · 1 shell still running\n",
+            "────────────────────────────────────────────────────────────────\n",
+            "  ⏵⏵ auto mode on · ← for agents\n",
+        );
+        let result = explain(Agent::Claude, screen);
+        assert_eq!(result.state, AgentState::Idle);
+        assert!(!result.visible_working);
+    });
+}
+
+#[test]
+fn claude_idle_prompt_without_background_work_stays_idle() {
+    with_manifest_dirs("claude-no-background", || {
+        let result = explain(
+            Agent::Claude,
+            &claude_background_screen("  ⏵⏵ auto mode on · ← for agents"),
+        );
+        assert_eq!(result.state, AgentState::Idle);
+        assert!(result.visible_idle);
+        assert!(!result.visible_working);
+    });
+}
+
+#[test]
+fn claude_blocker_with_background_shell_remains_blocked() {
+    with_manifest_dirs("claude-blocker-background", || {
+        let screen = concat!(
+            "do you want to proceed?\n",
+            "bash command: rm -rf /tmp/test\n",
+            "❯ 1. Yes\n",
+            "  2. No\n\n",
+            "Esc to cancel · Tab to amend · ctrl+e to explain\n",
+            "  ⏵⏵ auto mode on · 1 shell · ← for agents\n",
+        );
+        let result = explain(Agent::Claude, screen);
+        assert_eq!(result.state, AgentState::Blocked);
+        assert_eq!(
+            result.matched_rule.as_ref().map(|rule| rule.id.as_str()),
+            Some("bash_permission_prompt")
+        );
+        assert!(result.visible_blocker);
+        assert!(!result.visible_working);
+    });
+}
+
+fn codex_background_screen(footer: &str) -> String {
+    // Shaped like a real Codex pane: the finished turn, the background-terminal footer,
+    // then the empty prompt.
+    format!("  Worked for 28s • 2:33 PM\n\n{footer}\n\n\n› Ask Codex to do anything\n\n  gpt-5 · ~/repo\n")
+}
+
+fn assert_codex_background_working(footer: &str) {
+    with_manifest_dirs("codex-background", || {
+        let screen = codex_background_screen(footer);
+        let input = DetectionInput {
+            screen: &screen,
+            osc_title: "Verify warmup commits | repo",
+            osc_progress: "",
+        };
+        let result = explain_with_input(Agent::Codex, input);
+        assert_eq!(result.state, AgentState::Working, "footer: {footer}");
+        assert_eq!(
+            result.matched_rule.as_ref().map(|rule| rule.id.as_str()),
+            Some("background_terminal_working"),
+            "footer: {footer}"
+        );
+        assert!(result.visible_working);
+    });
+}
+
+#[test]
+fn codex_idle_prompt_with_background_terminals_is_working() {
+    assert_codex_background_working(
+        "  1 background terminal running · /ps to view · /stop to close",
+    );
+    assert_codex_background_working(
+        "  3 background terminals running · /ps to view · /stop to close",
+    );
+}
+
+#[test]
+fn codex_prompt_without_background_terminals_stays_idle() {
+    with_manifest_dirs("codex-no-background", || {
+        for footer in [
+            "  0 background terminals running",
+            "  no background terminal running",
+            "  background terminal finished",
+        ] {
+            let screen = codex_background_screen(footer);
+            let input = DetectionInput {
+                screen: &screen,
+                osc_title: "Verify warmup commits | repo",
+                osc_progress: "",
+            };
+            let result = explain_with_input(Agent::Codex, input);
+            assert_eq!(result.state, AgentState::Idle, "footer: {footer}");
+        }
+    });
+}
+
+#[test]
+fn codex_typed_background_terminal_text_cannot_fake_working() {
+    with_manifest_dirs("codex-typed-background", || {
+        let screen =
+            "  Worked for 28s • 2:33 PM\n\n› 1 background terminal running\n\n  gpt-5 · ~/repo\n";
+        let input = DetectionInput {
+            screen,
+            osc_title: "Verify warmup commits | repo",
+            osc_progress: "",
+        };
+        assert_eq!(
+            explain_with_input(Agent::Codex, input).state,
+            AgentState::Idle
+        );
+    });
+}
+
+#[test]
+fn codex_permission_prompt_still_wins_over_background_terminals() {
+    with_manifest_dirs("codex-background-blocked", || {
+        let screen = "  1 background terminal running · /ps to view\n\n›\n  press enter to confirm or esc to cancel\n";
+        let input = DetectionInput {
+            screen,
+            osc_title: "Verify warmup commits | repo",
+            osc_progress: "",
+        };
+        assert_eq!(
+            explain_with_input(Agent::Codex, input).state,
+            AgentState::Blocked
+        );
+    });
+}
+
+fn codex_title_case(screen: &str, title: &str) -> DetectionExplain {
+    explain_with_input(
+        Agent::Codex,
+        DetectionInput {
+            screen,
+            osc_title: title,
+            osc_progress: "",
+        },
+    )
+}
+
+// Captured from a real pane: Codex finished its turn but kept animating its window title
+// because it still tracked dead child processes.
+const CODEX_FINISHED_TURN: &str = "› r u done or still working\n\n\n• Done. All 28 runs are complete.\n  The 5090 is free.\n\n  Worked for 10s • 8:12 AM\n\n\n› p\n\n  GPT-6-Astra high · ~/repo… Goal achieved (3h 42m)\n  tab to queue message\n";
+
+#[test]
+fn codex_finished_turn_is_idle_even_if_the_title_still_spins() {
+    with_manifest_dirs("codex-stale-title", || {
+        let result = codex_title_case(CODEX_FINISHED_TURN, "⠙ Verify warmup commits | repo");
+        assert_eq!(result.state, AgentState::Idle);
+        assert_eq!(
+            result.matched_rule.as_ref().map(|rule| rule.id.as_str()),
+            Some("finished_turn_ignores_stale_title")
+        );
+        assert!(result.visible_idle);
+    });
+}
+
+#[test]
+fn codex_title_spinner_still_wins_while_a_turn_is_live() {
+    with_manifest_dirs("codex-live-turn", || {
+        for status in [
+            "• Working (12s • esc to interrupt)",
+            "• Working (1m 05s)",
+            "◦ Thinking (3s)",
+        ] {
+            let screen = format!(
+                "  Worked for 10s • 8:12 AM\n\n› next question\n\n{status}\n\n› \n  tab to queue message\n"
+            );
+            let result = codex_title_case(&screen, "⠙ Verify warmup commits | repo");
+            assert_eq!(result.state, AgentState::Working, "status: {status}");
+        }
+    });
+}
+
+#[test]
+fn codex_background_terminals_still_count_after_a_finished_turn() {
+    with_manifest_dirs("codex-finished-with-background", || {
+        let screen = "  Worked for 10s • 8:12 AM\n\n  1 background terminal running · /ps to view · /stop to close\n\n› \n";
+        let result = codex_title_case(screen, "⠙ Verify warmup commits | repo");
+        assert_eq!(result.state, AgentState::Working);
+    });
+}
+
+#[test]
+fn codex_finished_turn_rule_does_not_hide_permission_prompts() {
+    with_manifest_dirs("codex-finished-blocked", || {
+        let screen = "  Worked for 10s • 8:12 AM\n\n›\n  press enter to confirm or esc to cancel\n";
+        let result = codex_title_case(screen, "Action Required | repo");
+        assert_eq!(result.state, AgentState::Blocked);
+    });
+}
+
+const CAPACITY_ERROR: &str = "■ Selected model is at capacity. Please try a different model.";
+
+#[test]
+fn codex_model_at_capacity_is_blocked_until_work_resumes() {
+    with_manifest_dirs("codex-capacity", || {
+        // Captured shape: the error is among the latest lines and the prompt is idle.
+        let screen = format!(
+            "• Completed `/root/pro5000_benchmark`\n\n{CAPACITY_ERROR}\n\n\n› Ask Codex to do anything\n\n  gpt-5 · ~/repo\n"
+        );
+        let result = codex_title_case(&screen, "Verify warmup commits | repo");
+        assert_eq!(result.state, AgentState::Blocked);
+        assert_eq!(
+            result.matched_rule.as_ref().map(|rule| rule.id.as_str()),
+            Some("capacity_error_blocked")
+        );
+        assert!(result.visible_blocker);
+
+        // Even with a finished-turn line and a stale spinner above it.
+        let stale = format!("  Worked for 10s • 8:12 AM\n\n{CAPACITY_ERROR}\n\n› \n");
+        assert_eq!(
+            codex_title_case(&stale, "⠙ Verify warmup commits | repo").state,
+            AgentState::Blocked
+        );
+    });
+}
+
+#[test]
+fn codex_capacity_error_does_not_hide_a_live_turn_or_old_errors() {
+    with_manifest_dirs("codex-capacity-live", || {
+        // The user continued: a live status line means working, not blocked.
+        let live =
+            format!("{CAPACITY_ERROR}\n\n› try again\n\n• Working (4s • esc to interrupt)\n\n› \n");
+        assert_eq!(
+            codex_title_case(&live, "⠙ Verify warmup commits | repo").state,
+            AgentState::Working
+        );
+        // The error has scrolled out of the latest lines.
+        let mut old = format!("{CAPACITY_ERROR}\n");
+        for line in 0..12 {
+            old.push_str(&format!("• later output {line}\n"));
+        }
+        old.push_str("\n› Ask Codex to do anything\n");
+        assert_eq!(
+            codex_title_case(&old, "Verify warmup commits | repo").state,
+            AgentState::Idle
+        );
+        // Text typed at the prompt cannot fake it.
+        let typed = format!("  Worked for 10s • 8:12 AM\n\n› {CAPACITY_ERROR}\n");
+        assert_ne!(
+            codex_title_case(&typed, "Verify warmup commits | repo").state,
+            AgentState::Blocked
+        );
+    });
+}

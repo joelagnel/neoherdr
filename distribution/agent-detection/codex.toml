@@ -1,7 +1,7 @@
 id = "codex"
-version = "2026.10.11.1"
+version = "2026.10.30.2"
 min_engine_version = 3
-updated_at = "2026-10-11T00:00:00Z"
+updated_at = "2026-10-30T00:00:00Z"
 
 [[rules]]
 id = "osc_title_blocked"
@@ -10,6 +10,38 @@ priority = 1100
 region = "osc_title"
 visible_blocker = true
 contains = ["Action Required"]
+
+[[rules]]
+id = "capacity_error_blocked"
+state = "blocked"
+priority = 1070
+region = "bottom_non_empty_lines(8)"
+visible_blocker = true
+# The selected model is out of capacity: the agent is stopped and needs the user to pick another
+# model, so show it blocked (red) until a live turn starts or the message scrolls away. Anchored at
+# the line start so text typed at the "›" prompt cannot fake it; a live status line wins.
+line_regex = ['^\s*[■•✗×]?\s*Selected model is at capacity']
+not = [
+  { contains = [" to interrupt)"] },
+  { regex = ['\((?:[0-9]+[hm] )*[0-9]+s(?: • [^\r\n)]*)?\)'] },
+]
+
+[[rules]]
+id = "finished_turn_ignores_stale_title"
+state = "idle"
+priority = 1060
+region = "bottom_non_empty_lines(14)"
+visible_idle = true
+# Codex keeps animating its window title while it still tracks dead child processes, even
+# after the turn is over. A finished turn ("Worked for ... • time") followed by the prompt,
+# with no live status line and no background-terminal footer, is idle whatever the title says.
+# Permission prompts rank above this rule.
+regex = ['(?s)Worked for [0-9hms ]+ • [^\n]*\n.*›']
+not = [
+  { contains = [" to interrupt)"] },
+  { regex = ['\((?:[0-9]+[hm] )*[0-9]+s(?: • [^\r\n)]*)?\)'] },
+  { regex = ['background terminals? running'] },
+]
 
 [[rules]]
 id = "osc_title_working"
@@ -101,6 +133,17 @@ any = [
   { contains = ["do you want to"], any = [{ contains = ["yes"] }, { contains = ["❯"] }] },
   { contains = ["would you like to"], any = [{ contains = ["yes"] }, { contains = ["❯"] }] },
 ]
+
+[[rules]]
+id = "background_terminal_working"
+state = "working"
+priority = 550
+region = "bottom_non_empty_lines(8)"
+visible_working = true
+# Codex keeps background terminals alive after its turn ends: the title stops animating and
+# the footer reads "N background terminal(s) running". Anchored at the line start so text
+# typed at the "›" prompt cannot fake it; permission prompts rank above this rule.
+line_regex = ['^\s*[1-9]\d* background terminals? running\b']
 
 [[rules]]
 id = "screen_working_fallback"
