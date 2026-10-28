@@ -71,8 +71,8 @@ pub(super) fn render_expanded(
         agent_scroll,
         hits,
         |row| row.agent.rows.len(),
-        |buffer, rect, row, hits| {
-            super::agent_sidebar::render_agent_row(buffer, rect, &row.agent, config);
+        |buffer, rect, index, row, hits| {
+            super::agent_sidebar::render_agent_row(buffer, rect, index, &row.agent, config);
             if row.stale {
                 buffer.set_style(
                     rect,

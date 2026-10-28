@@ -200,6 +200,35 @@ fn status_dot(status: crate::api::schema::AgentStatus) -> &'static str {
     status_icon(status, crate::config::StatusIndicatorStyle::Dots)
 }
 
+/// Display order for spaces and agents: working first, then blocked, then
+/// finished-but-unseen, then everything idle. Lower sorts earlier.
+fn activity_rank(status: crate::api::schema::AgentStatus) -> u8 {
+    use crate::api::schema::AgentStatus;
+    match status {
+        AgentStatus::Working => 0,
+        AgentStatus::Blocked => 1,
+        AgentStatus::Done => 2,
+        AgentStatus::Idle | AgentStatus::Unknown => 3,
+    }
+}
+
+/// Sort key for spaces and agents: the activity rank, and among idle entries the
+/// most recently acknowledged finished work first, so a just-clicked entry lands
+/// directly below the colored ones instead of falling back to its old spot.
+fn activity_key(
+    snapshot: &ClientShellSnapshot,
+    status: crate::api::schema::AgentStatus,
+    id: &str,
+) -> (u8, std::cmp::Reverse<u64>) {
+    let rank = activity_rank(status);
+    let seen = if rank == activity_rank(crate::api::schema::AgentStatus::Idle) {
+        snapshot.seen_order.get(id).copied().unwrap_or(0)
+    } else {
+        0
+    };
+    (rank, std::cmp::Reverse(seen))
+}
+
 fn status_priority(status: crate::api::schema::AgentStatus) -> u8 {
     use crate::api::schema::AgentStatus;
     match status {

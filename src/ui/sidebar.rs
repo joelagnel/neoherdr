@@ -195,6 +195,18 @@ pub(crate) fn resolved_token_spans(
     let mut remaining = max_width
         .saturating_sub(separator_width + fixed_width)
         .saturating_sub(minimum);
+    // In rows without a workspace name (space detail rows), tab names keep their full
+    // width ahead of the other flexible tokens; elsewhere they share evenly.
+    let tab_first = !resolved
+        .iter()
+        .any(|token| matches!(token.kind, ResolvedTokenKind::Workspace(_)));
+    for (index, width) in flexible_widths.iter().enumerate().filter(|_| tab_first) {
+        if matches!(resolved[index].kind, ResolvedTokenKind::Tab(_)) && budgets[index] > 0 {
+            let extra = (*width - budgets[index]).min(remaining);
+            budgets[index] += extra;
+            remaining -= extra;
+        }
+    }
     while remaining > 0 {
         let mut grew = false;
         for (budget, width) in budgets.iter_mut().zip(&flexible_widths) {
@@ -235,8 +247,11 @@ pub(crate) fn resolved_token_spans(
                 truncate_end(text, budgets[index]),
                 apply_token_style(workspace_style, token.style),
             )),
+            ResolvedTokenKind::Tab(text) => spans.push(Span::styled(
+                truncate_end(text, budgets[index]),
+                apply_token_style(Style::default().fg(palette.subtext0), token.style),
+            )),
             ResolvedTokenKind::Machine(text)
-            | ResolvedTokenKind::Tab(text)
             | ResolvedTokenKind::Pane(text)
             | ResolvedTokenKind::Agent(text)
             | ResolvedTokenKind::Branch(text) => spans.push(Span::styled(
@@ -293,4 +308,103 @@ fn apply_token_style(mut style: Style, patch: crate::config::SidebarTokenStyle) 
         };
     }
     style
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::SidebarTokenStyle;
+
+    fn token(kind: ResolvedTokenKind) -> ResolvedToken {
+        ResolvedToken {
+            kind,
+            style: SidebarTokenStyle::default(),
+        }
+    }
+
+    fn rendered(width: usize) -> String {
+        let palette = Palette::catppuccin();
+        resolved_token_spans(
+            &[
+                token(ResolvedTokenKind::Tab("logs".into())),
+                token(ResolvedTokenKind::Branch(
+                    "feature/a-very-long-branch".into(),
+                )),
+            ],
+            ("●", Style::default()),
+            Style::default(),
+            Style::default(),
+            Style::default(),
+            Style::default(),
+            &palette,
+            width,
+        )
+        .iter()
+        .map(|span| span.content.as_ref())
+        .collect()
+    }
+
+    #[test]
+    fn long_branches_are_truncated_before_the_tab_name() {
+        let narrow = rendered(16);
+        assert!(
+            narrow.starts_with("logs"),
+            "tab keeps its full name: {narrow:?}"
+        );
+        assert!(narrow.contains('…'), "branch is truncated: {narrow:?}");
+        assert!(display_width(&narrow) <= 16);
+    }
+
+    #[test]
+    fn tab_does_not_starve_the_workspace_name_in_agent_rows() {
+        let palette = Palette::catppuccin();
+        let text: String = resolved_token_spans(
+            &[
+                token(ResolvedTokenKind::Workspace("neoherdr".into())),
+                token(ResolvedTokenKind::Tab("claude-review-session".into())),
+            ],
+            ("●", Style::default()),
+            Style::default(),
+            Style::default(),
+            Style::default(),
+            Style::default(),
+            &palette,
+            20,
+        )
+        .iter()
+        .map(|span| span.content.as_ref())
+        .collect();
+        assert!(text.starts_with("neoh"), "workspace keeps room: {text:?}");
+    }
+
+    #[test]
+    fn nothing_is_truncated_when_tab_and_branch_fit() {
+        assert_eq!(rendered(60), "logs → feature/a-very-long-branch");
+    }
+
+    #[test]
+    fn tab_token_is_readable_gray_while_other_secondary_tokens_stay_muted() {
+        let palette = Palette::catppuccin();
+        let token = |kind| ResolvedToken {
+            kind,
+            style: SidebarTokenStyle::default(),
+        };
+        let spans = resolved_token_spans(
+            &[
+                token(ResolvedTokenKind::Tab("logs".into())),
+                token(ResolvedTokenKind::Branch("main".into())),
+            ],
+            ("●", Style::default()),
+            Style::default(),
+            Style::default(),
+            Style::default().fg(palette.overlay0),
+            Style::default().fg(palette.overlay1),
+            &palette,
+            40,
+        );
+        let tab = spans.iter().find(|span| span.content == "logs").unwrap();
+        let branch = spans.iter().find(|span| span.content == "main").unwrap();
+        assert_eq!(tab.style.fg, Some(palette.subtext0));
+        assert_eq!(branch.style.fg, Some(palette.overlay0));
+    }
 }

@@ -15,6 +15,7 @@ pub(super) struct AgentRow {
     pub(super) status: crate::api::schema::AgentStatus,
     pub(super) focused: bool,
     pub(super) rows: Vec<Vec<crate::ui::ResolvedToken>>,
+    pub(super) state_text: String,
 }
 
 pub(super) fn ordered_agent_pane_ids(
@@ -38,10 +39,12 @@ pub(super) fn ordered_agent_pane_ids(
     if sort == crate::config::AgentPanelSortConfig::Priority {
         agents.sort_by_key(|agent| {
             (
-                std::cmp::Reverse(status_priority(agent.agent_status)),
+                activity_key(snapshot, agent.agent_status, &agent.pane_id),
                 std::cmp::Reverse(agent.state_change_seq),
             )
         });
+    } else {
+        agents.sort_by_key(|agent| activity_key(snapshot, agent.agent_status, &agent.pane_id));
     }
     agents
         .into_iter()
@@ -80,9 +83,9 @@ pub(super) fn render_agent_panel(
         agent_scroll,
         hits,
         |row| row.rows.len(),
-        |buffer, rect, row, hits| {
+        |buffer, rect, index, row, hits| {
             hits.agents.push((rect, row.pane_id.clone()));
-            render_agent_row(buffer, rect, row, config);
+            render_agent_row(buffer, rect, index, row, config);
         },
     );
 }
@@ -114,6 +117,16 @@ pub(super) fn render_agent_panel_header(
     );
     if area.height < 2 {
         return false;
+    }
+    if area.height >= 3 {
+        put_text(
+            buffer,
+            area.x,
+            area.y + 2,
+            area.width,
+            &"─".repeat(area.width as usize),
+            Style::default().fg(config.palette.overlay0),
+        );
     }
     put_text(
         buffer,
@@ -177,7 +190,7 @@ pub(super) fn render_agent_list<T>(
     agent_scroll: &mut usize,
     hits: &mut ShellHitMap,
     row_lines: impl Fn(&T) -> usize,
-    mut render_row: impl FnMut(&mut Buffer, Rect, &T, &mut ShellHitMap),
+    mut render_row: impl FnMut(&mut Buffer, Rect, usize, &T, &mut ShellHitMap),
 ) {
     let body = Rect::new(
         area.x,
@@ -234,7 +247,7 @@ pub(super) fn render_agent_list<T>(
             break;
         }
         let rect = Rect::new(body.x, y, content_width, height);
-        render_row(buffer, rect, row, hits);
+        render_row(buffer, rect, index, row, hits);
         y = y
             .saturating_add(height)
             .saturating_add(if index + 1 < rows.len() {
@@ -327,35 +340,51 @@ pub(super) fn agent_row(
         },
         state_text,
     );
+    let mut rows = rows;
+    if config.agents == crate::config::AgentsSidebarConfig::default() {
+        move_tab_to_detail_row(&mut rows);
+    }
     Some(AgentRow {
         pane_id: agent.pane_id.clone(),
         status: agent.agent_status,
         focused: agent.focused,
         rows,
+        state_text: state_text.to_owned(),
     })
+}
+
+/// The default rows put the tab beside the name; like the mobile list, show it on the
+/// second line as "tab · agent" instead. Customized rows are left as configured.
+fn move_tab_to_detail_row(rows: &mut [Vec<crate::ui::ResolvedToken>]) {
+    let [first, second] = rows else {
+        return;
+    };
+    let Some(position) = first
+        .iter()
+        .position(|token| matches!(token.kind, crate::ui::ResolvedTokenKind::Tab(_)))
+    else {
+        return;
+    };
+    let tab = first.remove(position);
+    second.insert(0, tab);
 }
 
 pub(super) fn render_agent_row(
     buffer: &mut Buffer,
     rect: Rect,
+    index: usize,
     row: &AgentRow,
     config: &ClientShellConfig,
 ) {
     let palette = &config.palette;
-    let row_style = if row.focused {
-        Style::default().bg(palette.active_row_bg)
+    let background = if row.focused {
+        Some(super::mobile::accent_tint(palette, false).unwrap_or(palette.active_row_bg))
     } else {
-        Style::default()
+        super::mobile::try_row_shade(palette, index)
     };
-    let name_style = if row.focused {
-        Style::default()
-            .fg(palette.text)
-            .add_modifier(Modifier::BOLD)
-    } else {
-        Style::default()
-            .fg(palette.subtext0)
-            .add_modifier(Modifier::BOLD)
-    };
+    let name_style = Style::default()
+        .fg(palette.text)
+        .add_modifier(Modifier::BOLD);
     let status_style = Style::default().fg(status_color(row.status, palette));
     let secondary = Style::default().fg(palette.overlay0);
     let icon = (
@@ -372,21 +401,52 @@ pub(super) fn render_agent_row(
     };
     for (index, tokens) in rows.iter().take(rect.height as usize).enumerate() {
         let indent = if index == 0 { 1 } else { 3 };
-        let mut spans = vec![ratatui::text::Span::raw(" ".repeat(indent))];
-        spans.extend(crate::ui::resolved_token_spans(
-            tokens,
-            icon,
-            status_style,
-            name_style,
-            secondary,
-            secondary,
-            palette,
-            rect.width.saturating_sub(indent as u16) as usize,
-        ));
-        Paragraph::new(Line::from(spans)).style(row_style).render(
+        let available = rect.width.saturating_sub(indent as u16);
+        let spans_for = |width: u16| {
+            let mut spans = vec![ratatui::text::Span::raw(" ".repeat(indent))];
+            spans.extend(crate::ui::resolved_token_spans(
+                tokens,
+                icon,
+                status_style,
+                name_style,
+                secondary,
+                secondary,
+                palette,
+                width as usize,
+            ));
+            spans
+        };
+        // The state shows at the right edge of the first line when the whole row still fits.
+        let state = Some(row.state_text.as_str())
+            .filter(|text| index == 0 && !text.is_empty())
+            .filter(|text| {
+                let used: usize = spans_for(available)
+                    .iter()
+                    .map(|span| display_width(span.content.as_ref()))
+                    .sum();
+                used + display_width(text) < rect.width as usize
+            });
+        let text_width = state.map_or(available, |text| {
+            available.saturating_sub(display_width(text) as u16 + 1)
+        });
+        Paragraph::new(Line::from(spans_for(text_width))).render(
             Rect::new(rect.x, rect.y + index as u16, rect.width, 1),
             buffer,
         );
+        if let Some(text) = state {
+            let width = display_width(text) as u16;
+            put_text(
+                buffer,
+                rect.right().saturating_sub(width + 1),
+                rect.y + index as u16,
+                width,
+                text,
+                secondary,
+            );
+        }
+    }
+    if let Some(background) = background {
+        buffer.set_style(rect, Style::default().bg(background));
     }
 }
 

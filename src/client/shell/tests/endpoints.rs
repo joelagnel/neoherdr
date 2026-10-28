@@ -1243,7 +1243,8 @@ fn active_workspace_is_the_only_highlight_when_machine_is_expanded() {
     );
     assert_eq!(
         buffer[(workspace.x + 2, workspace.y)].bg,
-        state.config.palette.active_row_bg
+        crate::client::shell::mobile::accent_tint(&state.config.palette, false)
+            .unwrap_or(state.config.palette.active_row_bg)
     );
 
     state.collapsed_endpoints.insert(endpoint_id.clone());

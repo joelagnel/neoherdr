@@ -214,7 +214,13 @@ fn duplicate_repo_parents_remain_visible_and_focusable_when_collapsed() {
                 assert!(!hit.indented);
                 assert_eq!(hit.group_toggle.is_some(), linked_child);
             }
-            let parent = state.hits.workspaces[0].rect;
+            let parent = state
+                .hits
+                .workspaces
+                .iter()
+                .find(|hit| hit.workspace_id == "ws_1")
+                .expect("parent row")
+                .rect;
             let status_cell =
                 usize::from(parent.y) * usize::from(frame.width) + usize::from(parent.x + 1);
             assert_ne!(
@@ -229,7 +235,13 @@ fn duplicate_repo_parents_remain_visible_and_focusable_when_collapsed() {
                     .any(|hit| hit.workspace_id == "ws_child" && hit.indented),
                 linked_child && !collapsed
             );
-            let duplicate = state.hits.workspaces[1].rect;
+            let duplicate = state
+                .hits
+                .workspaces
+                .iter()
+                .find(|hit| hit.workspace_id == "ws_duplicate")
+                .expect("duplicate row")
+                .rect;
             state.handle_raw_events(vec![RawInputEvent::Mouse(MouseEvent {
                 kind: MouseEventKind::Down(MouseButton::Left),
                 column: duplicate.x + 2,

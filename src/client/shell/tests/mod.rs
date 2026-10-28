@@ -63,6 +63,7 @@ pub(super) fn snapshot() -> ClientShellSnapshot {
         }],
         agents: Vec::new(),
         commands: Vec::new(),
+        seen_order: Default::default(),
     }
 }
 
@@ -250,6 +251,7 @@ mod chrome_context;
 mod close_pane;
 mod close_tab;
 mod copy;
+mod desktop_sidebar;
 mod endpoint_requests;
 mod endpoints;
 mod graphics;
@@ -263,3 +265,4 @@ mod mouse_selection;
 mod popup_focus_projection;
 mod sidebar_buttons;
 mod startup_overlays;
+mod status_order;

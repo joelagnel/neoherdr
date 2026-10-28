@@ -9,6 +9,10 @@ pub(super) struct EndpointAgentPresentation {
     acknowledged: HashMap<String, u64>,
     completed: HashMap<String, u64>,
     working: HashSet<String>,
+    /// When each completion was acknowledged: pane id to a counter value, so the
+    /// most recently seen finished work can be listed first among idle entries.
+    seen_order: HashMap<String, u64>,
+    seen_counter: u64,
     pending_completions: Option<(
         Option<u64>,
         crate::protocol::endpoint::EndpointAgentCompletions,
@@ -50,6 +54,7 @@ impl EndpointAgentPresentation {
             self.acknowledged.clear();
             self.completed.clear();
             self.working.clear();
+            self.seen_order.clear();
             self.acknowledged.extend(
                 snapshot
                     .agents
@@ -68,6 +73,8 @@ impl EndpointAgentPresentation {
             .retain(|pane_id, _| pane_ids.contains(pane_id.as_str()));
         self.working
             .retain(|pane_id| pane_ids.contains(pane_id.as_str()));
+        self.seen_order
+            .retain(|pane_id, _| pane_ids.contains(pane_id.as_str()));
         let completions = self
             .pending_completions
             .take()
@@ -113,6 +120,26 @@ impl EndpointAgentPresentation {
             agent.agent_status = self.projected_status(agent);
         }
         project_aggregate_status(snapshot);
+        self.publish_seen_order(snapshot);
+    }
+
+    /// Copies the acknowledgement order onto the snapshot: panes directly, and each
+    /// workspace takes the most recent order among its agents.
+    fn publish_seen_order(&self, snapshot: &mut ClientShellSnapshot) {
+        snapshot.seen_order = self.seen_order.clone();
+        for workspace in &snapshot.workspaces {
+            let latest = snapshot
+                .agents
+                .iter()
+                .filter(|agent| agent.workspace_id == workspace.workspace_id)
+                .filter_map(|agent| self.seen_order.get(&agent.pane_id))
+                .max();
+            if let Some(latest) = latest {
+                snapshot
+                    .seen_order
+                    .insert(workspace.workspace_id.clone(), *latest);
+            }
+        }
     }
 
     pub(super) fn acknowledge_surface(
@@ -138,10 +165,17 @@ impl EndpointAgentPresentation {
             else {
                 continue;
             };
+            let was_unseen_completion =
+                !self.seen(agent) && self.completed.contains_key(&agent.pane_id);
             let acknowledged = self.acknowledged.entry(agent.pane_id.clone()).or_default();
             if *acknowledged < agent.state_change_seq {
                 *acknowledged = agent.state_change_seq;
                 changed = true;
+                if was_unseen_completion {
+                    self.seen_counter += 1;
+                    self.seen_order
+                        .insert(agent.pane_id.clone(), self.seen_counter);
+                }
             }
         }
         if changed {
@@ -149,6 +183,7 @@ impl EndpointAgentPresentation {
                 agent.agent_status = self.projected_status(agent);
             }
             project_aggregate_status(snapshot);
+            self.publish_seen_order(snapshot);
         }
         changed
     }
@@ -432,6 +467,70 @@ mod tests {
 
         assert!(presentation.acknowledge_surface(&mut completed, &surface(2), Some(true)));
         assert_eq!(completed.agents[0].agent_status, AgentStatus::Idle);
+    }
+
+    fn two_agents(
+        first: AgentStatus,
+        second: AgentStatus,
+        seq: u64,
+        revision: u64,
+    ) -> ClientShellSnapshot {
+        let mut snapshot = snapshot(first, seq, revision);
+        let mut one = agent(first, seq);
+        one.pane_id = "pane-one".into();
+        one.workspace_id = "ws_1".into();
+        let mut two = agent(second, seq);
+        two.pane_id = "pane-two".into();
+        two.workspace_id = "ws_1".into();
+        snapshot.agents = vec![one, two];
+        snapshot
+    }
+
+    fn surface_for(pane_id: &str, revision: u64) -> PaneSurfaceFrame {
+        let mut frame = surface(revision);
+        frame.panes[0].pane_id = pane_id.into();
+        frame
+    }
+
+    #[test]
+    fn acknowledging_a_completion_records_the_order_it_was_seen_in() {
+        let mut presentation = EndpointAgentPresentation::default();
+        let mut initial = two_agents(AgentStatus::Working, AgentStatus::Working, 4, 1);
+        presentation.project_snapshot(&mut initial);
+        let mut completed = two_agents(AgentStatus::Idle, AgentStatus::Idle, 5, 2);
+        presentation.project_snapshot(&mut completed);
+        assert!(completed.seen_order.is_empty(), "nothing seen yet");
+
+        assert!(presentation.acknowledge_surface(
+            &mut completed,
+            &surface_for("pane-two", 2),
+            Some(true)
+        ));
+        assert_eq!(completed.seen_order.get("pane-two"), Some(&1));
+        assert_eq!(completed.seen_order.get("pane-one"), None);
+        assert_eq!(
+            completed.seen_order.get("ws_1"),
+            Some(&1),
+            "space inherits its agents'"
+        );
+
+        assert!(presentation.acknowledge_surface(
+            &mut completed,
+            &surface_for("pane-one", 2),
+            Some(true)
+        ));
+        assert_eq!(
+            completed.seen_order.get("pane-one"),
+            Some(&2),
+            "later click, higher order"
+        );
+        assert_eq!(completed.seen_order.get("ws_1"), Some(&2));
+
+        // A fresh snapshot from the server keeps the recorded order.
+        let mut later = two_agents(AgentStatus::Idle, AgentStatus::Idle, 5, 3);
+        presentation.project_snapshot(&mut later);
+        assert_eq!(later.seen_order.get("pane-two"), Some(&1));
+        assert_eq!(later.seen_order.get("pane-one"), Some(&2));
     }
 
     #[test]
