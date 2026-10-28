@@ -672,3 +672,59 @@ fn mobile_switcher_scroll_close_and_width_transition_clear_mobile_hits() {
     assert!(state.hits.mobile_close.is_empty());
     assert!(state.hits.mobile_targets.is_empty());
 }
+
+fn mobile_row_text(frame: &FrameData, row: u16) -> String {
+    let width = usize::from(frame.width);
+    let start = usize::from(row) * width;
+    frame.cells[start..start + width]
+        .iter()
+        .map(|cell| cell.symbol.as_str())
+        .collect()
+}
+
+#[test]
+fn mobile_switcher_lists_spaces_before_agents() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut projected = snapshot();
+    projected.agents.push(ClientShellAgent {
+        pane_id: "pane_1".into(),
+        workspace_id: "ws_1".into(),
+        tab_id: "tab_1".into(),
+        name: Some("pi".into()),
+        display_agent: Some("pi".into()),
+        agent: Some("pi".into()),
+        title: None,
+        terminal_title: None,
+        terminal_title_stripped: None,
+        agent_status: AgentStatus::Idle,
+        state_change_seq: 1,
+        state_labels: Vec::new(),
+        tokens: Vec::new(),
+        focused: true,
+    });
+    state.set_snapshot(Box::new(projected));
+    state.set_pane_surface(surface());
+    state.mode = ClientShellMode::Navigate;
+    let frame = state.compose(44, 30).expect("mobile switcher");
+    let rows = (0..frame.height)
+        .map(|row| mobile_row_text(&frame, row))
+        .collect::<Vec<_>>();
+    let spaces = rows.iter().position(|row| row.contains("spaces")).unwrap();
+    let agents = rows.iter().position(|row| row.contains("agents")).unwrap();
+    let tabs = rows.iter().position(|row| row.contains("tabs")).unwrap();
+    assert!(spaces < agents, "spaces must come before agents");
+    assert!(agents < tabs, "agents stay ahead of tabs");
+    let hit_y = |wanted: fn(&ClientMobileTarget) -> bool| {
+        state
+            .hits
+            .mobile_targets
+            .iter()
+            .find(|(_, target)| wanted(target))
+            .map(|(rect, _)| rect.y)
+            .unwrap()
+    };
+    assert!(
+        hit_y(|target| matches!(target, ClientMobileTarget::Workspace { .. }))
+            < hit_y(|target| matches!(target, ClientMobileTarget::Agent { .. }))
+    );
+}

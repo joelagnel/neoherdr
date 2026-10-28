@@ -610,6 +610,7 @@ fn mobile_items(
             });
         }
     }
+    let agents_start = items.len();
     let agents = super::aggregate_navigation::aggregate_agent_rows(
         endpoints,
         active_endpoint_id,
@@ -747,6 +748,7 @@ fn mobile_items(
         }
     }
 
+    let spaces_start = items.len();
     items.push(MobileItem::section("spaces", palette));
     items.push(MobileItem::action(
         "  + new workspace",
@@ -878,6 +880,9 @@ fn mobile_items(
             });
         }
     }
+
+    // Agents are built first; rotate so the spaces section leads the switcher.
+    items[agents_start..].rotate_left(spaces_start - agents_start);
 
     if let Some(workspace_id) = snapshot.focused_workspace_id.as_deref() {
         items.push(MobileItem::section("tabs", palette));
