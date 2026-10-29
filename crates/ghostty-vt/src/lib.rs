@@ -845,6 +845,68 @@ pub struct LinkRegion {
     pub end_col: u16,
 }
 
+/// One row's worth of a URL that an application hard-wrapped (explicit line break plus an
+/// indented continuation) instead of leaving it to the terminal's soft wrap.
+#[derive(Debug, Clone)]
+struct HardWrapSegment {
+    row: u16,
+    start_col: u16,
+    end_col: u16,
+    text: String,
+}
+
+#[derive(Debug, Default)]
+struct HardWrapExtension {
+    before: Vec<HardWrapSegment>,
+    after: Vec<HardWrapSegment>,
+}
+
+impl HardWrapExtension {
+    fn before_text(&self) -> String {
+        self.before
+            .iter()
+            .map(|segment| segment.text.as_str())
+            .collect()
+    }
+
+    fn after_text(&self) -> String {
+        self.after
+            .iter()
+            .map(|segment| segment.text.as_str())
+            .collect()
+    }
+}
+
+/// One viewport cell as seen by the hard-wrap joiner.
+struct RowCell {
+    text: String,
+    spacer: bool,
+}
+
+impl RowCell {
+    fn blank(&self) -> bool {
+        !self.spacer && self.text.chars().next().is_none_or(char::is_whitespace)
+    }
+}
+
+/// Continuation rows may be indented by up to this many columns (a hanging indent).
+const HARD_WRAP_MAX_INDENT: usize = 8;
+/// Upper bound on rows joined onto one URL.
+const HARD_WRAP_MAX_ROWS: usize = 16;
+
+fn has_url_scheme(text: &str) -> bool {
+    text.contains("http://") || text.contains("https://")
+}
+
+/// A continuation must look like part of a URL, not a bullet or other decoration.
+fn plausible_url_continuation(token: &str) -> bool {
+    let Some(first) = token.chars().next() else {
+        return false;
+    };
+    let lone_bullet = token.chars().count() == 1 && matches!(first, '-' | '*' | '+' | '>' | '|');
+    !lone_bullet && (first.is_ascii_alphanumeric() || "-._~:/?#[]@!$&'()*+,;=%".contains(first))
+}
+
 pub struct Terminal {
     raw: ffi::GhosttyTerminal,
     max_scrollback: usize,
@@ -1369,20 +1431,24 @@ impl Terminal {
     pub fn viewport_link_target(&self, x: u16, y: u32) -> Result<Option<LinkTarget>, Error> {
         Ok(self
             .viewport_link_selection(x, y)?
-            .map(|(target, _)| target))
+            .map(|(target, _, _)| target))
     }
 
     fn viewport_link_selection(
         &self,
         x: u16,
         y: u32,
-    ) -> Result<Option<(LinkTarget, Option<ffi::GhosttySelection>)>, Error> {
+    ) -> Result<Option<(LinkTarget, Option<ffi::GhosttySelection>, HardWrapExtension)>, Error> {
         let mut clicked = self.grid_ref(ghostty_viewport_point(x, y))?;
         if grid_ref_wide(&clicked)? == CellWide::SpacerTail {
             clicked.x = clicked.x.saturating_sub(1);
         }
         if let Some(uri) = grid_ref_hyperlink_uri(&clicked)? {
-            return Ok(Some((LinkTarget::Uri(uri), None)));
+            return Ok(Some((
+                LinkTarget::Uri(uri),
+                None,
+                HardWrapExtension::default(),
+            )));
         }
         let graphemes = grid_ref_graphemes(&clicked)?;
         if graphemes
@@ -1428,13 +1494,223 @@ impl Terminal {
             .filter_map(char::from_u32)
             .map(char::len_utf8)
             .sum();
+        let extension = self.hard_wrap_extension(&selection, &text)?;
+        let before = extension.before_text();
+        let text = format!("{before}{text}{}", extension.after_text());
         Ok(Some((
             LinkTarget::Text {
                 text,
-                clicked_byte: prefix.len().saturating_sub(clicked_len),
+                clicked_byte: before.len() + prefix.len().saturating_sub(clicked_len),
             },
             Some(selection),
+            extension,
         )))
+    }
+
+    fn visible_viewport_point(
+        &self,
+        grid_ref: &ffi::GhosttyGridRef,
+        rows: u16,
+    ) -> Result<Option<(u16, u32)>, Error> {
+        let mut out = ffi::GhosttyPointCoordinate::default();
+        let result = unsafe {
+            ffi::ghostty_terminal_point_from_grid_ref(
+                self.raw,
+                grid_ref,
+                ffi::GhosttyPointTag_GHOSTTY_POINT_TAG_VIEWPORT,
+                &mut out,
+            )
+        };
+        if result == ffi::GhosttyResult_GHOSTTY_NO_VALUE {
+            return Ok(None);
+        }
+        result.into_result()?;
+        Ok((out.y < u32::from(rows)).then_some((out.x, out.y)))
+    }
+
+    fn viewport_row_cells(&self, row: u32, cols: u16) -> Result<Vec<RowCell>, Error> {
+        let mut cell = self.grid_ref(ghostty_viewport_point(0, row))?;
+        let mut cells = Vec::with_capacity(usize::from(cols));
+        for col in 0..cols {
+            cell.x = col;
+            let spacer = matches!(
+                grid_ref_wide(&cell)?,
+                CellWide::SpacerHead | CellWide::SpacerTail
+            );
+            let text = if spacer {
+                String::new()
+            } else {
+                grid_ref_graphemes(&cell)?
+                    .into_iter()
+                    .filter_map(char::from_u32)
+                    .collect()
+            };
+            cells.push(RowCell { text, spacer });
+        }
+        Ok(cells)
+    }
+
+    /// Joins the rows of a URL that an application wrapped itself. The terminal only
+    /// marks soft wraps, so a token that fills its row up to the right edge and continues
+    /// on an indented following row (as Claude Code draws it) is otherwise cut at the break.
+    /// Both directions are bounded, visible-viewport only, and require a URL scheme.
+    fn hard_wrap_extension(
+        &self,
+        selection: &ffi::GhosttySelection,
+        text: &str,
+    ) -> Result<HardWrapExtension, Error> {
+        let cols = self.cols()?;
+        let rows = self.rows()?;
+        let mut extension = HardWrapExtension::default();
+        if cols < 2 {
+            return Ok(extension);
+        }
+        let head_in_main = has_url_scheme(text);
+        if !head_in_main {
+            if let Some(start) = self.visible_viewport_point(&selection.start, rows)? {
+                extension.before = self.hard_wrap_before(start, cols)?;
+            }
+            if extension.before.is_empty() {
+                return Ok(extension);
+            }
+        }
+        if let Some(end) = self.visible_viewport_point(&selection.end, rows)? {
+            if !self.row_soft_wrapped(end.1)? {
+                extension.after = self.hard_wrap_after(end, cols, rows)?;
+            }
+        }
+        Ok(extension)
+    }
+
+    /// Whether the terminal wrapped this viewport row into the next one by itself.
+    fn row_soft_wrapped(&self, row: u32) -> Result<bool, Error> {
+        let grid_ref = self.grid_ref(ghostty_viewport_point(0, row))?;
+        Ok(grid_ref_wrap_state(&grid_ref)?.0)
+    }
+
+    fn token_bounds(cells: &[RowCell], from: usize) -> (usize, usize) {
+        let mut end = from;
+        while end + 1 < cells.len() && !cells[end + 1].blank() {
+            end += 1;
+        }
+        (from, end)
+    }
+
+    fn cells_text(cells: &[RowCell], start: usize, end: usize) -> String {
+        cells[start..=end]
+            .iter()
+            .map(|cell| cell.text.as_str())
+            .collect()
+    }
+
+    fn hard_wrap_after(
+        &self,
+        end: (u16, u32),
+        cols: u16,
+        rows: u16,
+    ) -> Result<Vec<HardWrapSegment>, Error> {
+        let mut segments = Vec::new();
+        let (mut end_col, mut row) = end;
+        // The selection's own row is already known not to soft-wrap onward.
+        let mut soft = false;
+        while segments.len() < HARD_WRAP_MAX_ROWS && end_col == cols - 1 {
+            let next = row + 1;
+            if next >= u32::from(rows) {
+                break;
+            }
+            let cells = self.viewport_row_cells(next, cols)?;
+            let Some(first) = cells.iter().position(|cell| !cell.blank()) else {
+                break;
+            };
+            let (start, last) = Self::token_bounds(&cells, first);
+            let text = Self::cells_text(&cells, start, last);
+            if soft {
+                // The terminal wrapped the previous (joined) row itself: the token carries on
+                // from column 0, exactly like an ordinary soft wrap.
+                if first != 0 {
+                    break;
+                }
+            } else {
+                if first == 0 || first > HARD_WRAP_MAX_INDENT || !plausible_url_continuation(&text)
+                {
+                    break;
+                }
+                // A last row that stops short and shares its line with other words is only
+                // joined when the token itself looks like a URL tail.
+                let ends_row = last == usize::from(cols - 1);
+                let shares_line = cells[last + 1..].iter().any(|cell| !cell.blank());
+                if !ends_row && shares_line && !text.chars().any(|c| "/?#=&%._-:~+@;,".contains(c))
+                {
+                    break;
+                }
+            }
+            segments.push(HardWrapSegment {
+                row: next as u16,
+                start_col: start as u16,
+                end_col: last as u16,
+                text,
+            });
+            end_col = last as u16;
+            row = next;
+            soft = self.row_soft_wrapped(next)?;
+        }
+        Ok(segments)
+    }
+
+    /// Walks back over rows whose token starts after an indent and whose previous row is
+    /// filled to the right edge. Only returns rows when the chain reaches a URL scheme.
+    fn hard_wrap_before(
+        &self,
+        start: (u16, u32),
+        cols: u16,
+    ) -> Result<Vec<HardWrapSegment>, Error> {
+        let mut segments: Vec<HardWrapSegment> = Vec::new();
+        let (mut start_col, mut row) = start;
+        while segments.len() < HARD_WRAP_MAX_ROWS && row > 0 {
+            // Hover runs this on every mouse move: bail before reading any row unless the
+            // token starts in the indent range of a hard-wrapped continuation.
+            if start_col == 0 || usize::from(start_col) > HARD_WRAP_MAX_INDENT {
+                break;
+            }
+            let cells = self.viewport_row_cells(row, cols)?;
+            let first = cells.iter().position(|cell| !cell.blank());
+            if first != Some(usize::from(start_col))
+                || start_col == 0
+                || usize::from(start_col) > HARD_WRAP_MAX_INDENT
+            {
+                break;
+            }
+            let prev = row - 1;
+            if self.row_soft_wrapped(prev)? {
+                break;
+            }
+            let prev_cells = self.viewport_row_cells(prev, cols)?;
+            let last = usize::from(cols - 1);
+            if prev_cells[last].blank() {
+                break;
+            }
+            let mut token_start = last;
+            while token_start > 0 && !prev_cells[token_start - 1].blank() {
+                token_start -= 1;
+            }
+            let text = Self::cells_text(&prev_cells, token_start, last);
+            let head = has_url_scheme(&text);
+            segments.insert(
+                0,
+                HardWrapSegment {
+                    row: prev as u16,
+                    start_col: token_start as u16,
+                    end_col: last as u16,
+                    text,
+                },
+            );
+            if head {
+                return Ok(segments);
+            }
+            start_col = token_start as u16;
+            row = prev;
+        }
+        Ok(Vec::new())
     }
 
     /// Resolve only the bounded plain-text token. OSC 8 regions are resolved by
@@ -1450,7 +1726,7 @@ impl Terminal {
         if x >= cols || y >= u32::from(rows) {
             return Ok(Vec::new());
         }
-        let Some((LinkTarget::Text { text, clicked_byte }, Some(selection))) =
+        let Some((LinkTarget::Text { text, clicked_byte }, Some(selection), extension)) =
             self.viewport_link_selection(x, y)?
         else {
             return Ok(Vec::new());
@@ -1460,25 +1736,11 @@ impl Terminal {
         };
         let point =
             |grid_ref: &ffi::GhosttyGridRef, clipped: (u16, u32)| -> Result<(u16, u32), Error> {
-                let mut out = ffi::GhosttyPointCoordinate::default();
-                let result = unsafe {
-                    ffi::ghostty_terminal_point_from_grid_ref(
-                        self.raw,
-                        grid_ref,
-                        ffi::GhosttyPointTag_GHOSTTY_POINT_TAG_VIEWPORT,
-                        &mut out,
-                    )
-                };
-                if result == ffi::GhosttyResult_GHOSTTY_NO_VALUE {
-                    return Ok(clipped);
-                }
-                result.into_result()?;
                 // C viewport coordinates can extend below the visible viewport
                 // when scrolled up. Clip those as well as NO_VALUE endpoints.
-                if out.y >= u32::from(rows) {
-                    return Ok(clipped);
-                }
-                Ok((out.x, out.y))
+                Ok(self
+                    .visible_viewport_point(grid_ref, rows)?
+                    .unwrap_or(clipped))
             };
         // The selected token contains the visible hovered cell, so an invisible
         // start/end necessarily lies above/below the viewport respectively.
@@ -1498,23 +1760,15 @@ impl Terminal {
                 .map(char::len_utf8)
                 .sum())
         };
-        // Format a prefix once, not once per cell. Then walk only the selected
-        // visible cells, retaining one page/grid lookup per row.
-        let prefix = self.format_selection(
-            &ffi::GhosttySelection {
-                end: first,
-                ..selection
-            },
-            FormatterFormat::Plain,
-            true,
-            false,
-        )?;
-        let mut byte = prefix.len().saturating_sub(cell_len(&first)?);
         let mut regions: Vec<LinkRegion> = Vec::new();
-        for row in start_row..=end_row {
+        // Walks one row's cells, adding the cells whose bytes fall inside `range`.
+        let visit_row = |row: u32,
+                         left: u16,
+                         right: u16,
+                         byte: &mut usize,
+                         regions: &mut Vec<LinkRegion>|
+         -> Result<(), Error> {
             let mut cell = self.grid_ref(ghostty_viewport_point(0, row))?;
-            let left = if row == start_row { start_col } else { 0 };
-            let right = if row == end_row { end_col } else { cols - 1 };
             for col in left..=right {
                 cell.x = col;
                 let wide = grid_ref_wide(&cell)?;
@@ -1522,7 +1776,7 @@ impl Terminal {
                     continue;
                 }
                 let len = cell_len(&cell)?;
-                if byte < range.end && byte + len > range.start {
+                if *byte < range.end && *byte + len > range.start {
                     let end = if wide == CellWide::Wide {
                         (col + 1).min(cols - 1)
                     } else {
@@ -1541,8 +1795,46 @@ impl Terminal {
                         });
                     }
                 }
-                byte += len;
+                *byte += len;
             }
+            Ok(())
+        };
+        // Rows joined from earlier hard-wrapped rows come first in the text.
+        let mut byte = 0usize;
+        for segment in &extension.before {
+            visit_row(
+                u32::from(segment.row),
+                segment.start_col,
+                segment.end_col,
+                &mut byte,
+                &mut regions,
+            )?;
+        }
+        // Format a prefix once, not once per cell. Then walk only the selected
+        // visible cells, retaining one page/grid lookup per row.
+        let prefix = self.format_selection(
+            &ffi::GhosttySelection {
+                end: first,
+                ..selection
+            },
+            FormatterFormat::Plain,
+            true,
+            false,
+        )?;
+        byte += prefix.len().saturating_sub(cell_len(&first)?);
+        for row in start_row..=end_row {
+            let left = if row == start_row { start_col } else { 0 };
+            let right = if row == end_row { end_col } else { cols - 1 };
+            visit_row(row, left, right, &mut byte, &mut regions)?;
+        }
+        for segment in &extension.after {
+            visit_row(
+                u32::from(segment.row),
+                segment.start_col,
+                segment.end_col,
+                &mut byte,
+                &mut regions,
+            )?;
         }
         Ok(regions)
     }
@@ -4420,6 +4712,105 @@ mod tests {
                 clicked_byte: 19
             })
         );
+    }
+
+    fn whole_token(text: &str, _clicked: usize) -> Option<std::ops::Range<usize>> {
+        Some(0..text.len())
+    }
+
+    /// Apps such as Claude Code wrap long URLs themselves: the row is filled to the right
+    /// edge, there is a hard line break (no soft-wrap flag) and the continuation is indented.
+    #[test]
+    fn link_target_joins_a_hard_wrapped_url_with_an_indented_continuation() {
+        let mut terminal = Terminal::new(20, 4, 1024).unwrap();
+        terminal.write(b"go https://example.c\r\n  om/path/x");
+        let url = "https://example.com/path/x";
+        // Clicking the first part: 'h' sits at col 3, so col 6 is char index 3.
+        assert_eq!(
+            terminal.viewport_link_target(6, 0).unwrap(),
+            Some(LinkTarget::Text {
+                text: url.into(),
+                clicked_byte: 3
+            })
+        );
+        // Clicking the continuation: col 4 is the '/' after "om", char index 19.
+        assert_eq!(
+            terminal.viewport_link_target(4, 1).unwrap(),
+            Some(LinkTarget::Text {
+                text: url.into(),
+                clicked_byte: 19
+            })
+        );
+    }
+
+    #[test]
+    fn link_target_joins_a_url_hard_wrapped_over_several_rows() {
+        let mut terminal = Terminal::new(20, 5, 1024).unwrap();
+        terminal.write(b"x https://example.co\r\n  m/aaaaaaaaaaaaaaaa\r\n  bbbb/cc");
+        let url = "https://example.com/aaaaaaaaaaaaaaaabbbb/cc";
+        for (col, row) in [(5u16, 0u32), (6, 1), (3, 2)] {
+            let Some(LinkTarget::Text { text, .. }) =
+                terminal.viewport_link_target(col, row).unwrap()
+            else {
+                panic!("text target at ({col},{row})");
+            };
+            assert_eq!(text, url, "click at ({col},{row})");
+        }
+    }
+
+    #[test]
+    fn link_regions_cover_every_row_of_a_hard_wrapped_url() {
+        let mut terminal = Terminal::new(20, 4, 1024).unwrap();
+        terminal.write(b"go https://example.c\r\n  om/path/x");
+        for (col, row) in [(6u16, 0u32), (4, 1)] {
+            let regions = terminal
+                .viewport_link_regions(col, row, whole_token)
+                .unwrap()
+                .into_iter()
+                .map(|r| (r.row, r.start_col, r.end_col))
+                .collect::<Vec<_>>();
+            assert_eq!(regions, [(0, 3, 19), (1, 2, 10)], "hover at ({col},{row})");
+        }
+    }
+
+    #[test]
+    fn link_target_does_not_join_unrelated_indented_text() {
+        for tail in [
+            &b"  \xe2\x97\x8f bullet"[..],
+            b"  - item",
+            b"nextline",
+            b"  has space",
+        ] {
+            let mut terminal = Terminal::new(20, 4, 1024).unwrap();
+            terminal.write(b"go https://example.c\r\n");
+            terminal.write(tail);
+            let Some(LinkTarget::Text { text, .. }) = terminal.viewport_link_target(6, 0).unwrap()
+            else {
+                panic!("text target");
+            };
+            assert_eq!(
+                text,
+                "https://example.c",
+                "tail {:?}",
+                String::from_utf8_lossy(tail)
+            );
+        }
+        // A token that stops short of the right edge is not a wrapped row.
+        let mut terminal = Terminal::new(20, 4, 1024).unwrap();
+        terminal.write(b"go https://ex.c\r\n  om/path");
+        let Some(LinkTarget::Text { text, .. }) = terminal.viewport_link_target(6, 0).unwrap()
+        else {
+            panic!("text target");
+        };
+        assert_eq!(text, "https://ex.c");
+        // Without a URL scheme nothing is joined, even in the same layout.
+        let mut terminal = Terminal::new(20, 4, 1024).unwrap();
+        terminal.write(b"go example.comexample\r\n  om/path");
+        let Some(LinkTarget::Text { text, .. }) = terminal.viewport_link_target(6, 0).unwrap()
+        else {
+            panic!("text target");
+        };
+        assert_eq!(text, "example.comexample");
     }
 
     #[test]

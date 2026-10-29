@@ -2521,6 +2521,39 @@ mod tests {
     }
 
     #[test]
+    fn link_activation_joins_a_url_the_application_hard_wrapped() {
+        // Shaped like Claude Code output: the URL fills the row, then continues on an
+        // indented row after an explicit line break (no terminal soft-wrap flag).
+        let url = "https://example.atlassian.net/wiki/spaces/ABC/pages/4071325006/How+good+are";
+        let line = format!("Page: {url}");
+        let (head, tail) = line.split_at(40);
+        let mut terminal = crate::ghostty::Terminal::new(40, 4, 1024).unwrap();
+        terminal.write(format!("{head}\r\n  {tail}").as_bytes());
+        for (col, row) in [(10, 0), (39, 0), (2, 1), (20, 1), (1, 2)] {
+            let target = terminal.viewport_link_target(col, row).unwrap().unwrap();
+            assert_eq!(
+                url_from_link_target(target).as_deref(),
+                Some(url),
+                "click at ({col},{row})"
+            );
+        }
+        let regions = terminal
+            .viewport_link_regions(10, 0, url_byte_range)
+            .unwrap()
+            .into_iter()
+            .map(|r| (r.row, r.start_col, r.end_col))
+            .collect::<Vec<_>>();
+        // The continuation row is itself full, so its last three characters soft-wrap onto
+        // a third row; the underline follows the whole URL.
+        let wrapped = tail.len() as u16 - 38;
+        assert_eq!(
+            regions,
+            [(0, 6, 39), (1, 2, 39), (2, 0, wrapped - 1)],
+            "hover underlines every row of the URL"
+        );
+    }
+
+    #[test]
     fn link_activation_preserves_unicode_and_click_boundaries_after_resize() {
         let mut terminal = crate::ghostty::Terminal::new(80, 5, 1024 * 1024).unwrap();
         terminal.write("[文档](https://example.com/路径?q=a(b)), next".as_bytes());
