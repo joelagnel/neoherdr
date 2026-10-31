@@ -564,11 +564,22 @@ impl ClientState {
         let frame_output::ComposedFrame {
             frame: mut frame_data,
             graphics,
+            native_links_from,
         } = frame_data.into();
         // With capture enabled, host OSC 8 can intercept Ctrl-click before plugins.
         // Keep semantic links internally and restore native links when capture is off.
+        // Links the client made for wrapped URLs are the exception: the host has no other way
+        // to see the whole address.
         if self.shell_mouse_capture_preference {
-            frame_data.hyperlinks.clear();
+            let keep = native_links_from.min(frame_data.hyperlinks.len());
+            let native = frame_data.hyperlinks.split_off(keep);
+            frame_data.hyperlinks = native;
+            for cell in &mut frame_data.cells {
+                cell.hyperlink = cell
+                    .hyperlink
+                    .and_then(|index| (index as usize).checked_sub(keep))
+                    .map(|index| index as u32);
+            }
         }
         let frame_data = if self.draw_host_cursor {
             render_ansi::frame_with_drawn_cursor(frame_data)
