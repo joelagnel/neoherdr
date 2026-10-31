@@ -11,12 +11,18 @@ use base64::Engine as _;
 pub(crate) struct ComposedFrame {
     pub(crate) frame: FrameData,
     pub(crate) graphics: GraphicsOutput,
+    /// Hyperlink table index where client-made links begin; every earlier entry is pane content.
+    pub(crate) native_links_from: usize,
 }
 
 impl From<FrameData> for ComposedFrame {
     fn from(mut frame: FrameData) -> Self {
         let graphics = GraphicsOutput::from_bytes(std::mem::take(&mut frame.graphics));
-        Self { frame, graphics }
+        Self {
+            frame,
+            graphics,
+            native_links_from: usize::MAX,
+        }
     }
 }
 
