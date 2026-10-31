@@ -720,8 +720,22 @@ impl ClientShellState {
             self.hits.pane_splits.clear();
             self.hits.popup = None;
         }
+        let native_links_from = frame.hyperlinks.len();
+        if !layout.mobile_header.is_empty()
+            && self.mode == ClientShellMode::Terminal
+            && self.overlay.is_none()
+            && self.popup_terminal_id.is_none()
+        {
+            for hit in &self.hits.panes {
+                super::link_unwrap::tag_wrapped_urls(&mut frame, hit.inner_rect);
+            }
+        }
         let graphics = self.compose_graphics(layout, &occlusion);
-        Some(crate::client::frame_output::ComposedFrame { frame, graphics })
+        Some(crate::client::frame_output::ComposedFrame {
+            frame,
+            graphics,
+            native_links_from,
+        })
     }
 }
 

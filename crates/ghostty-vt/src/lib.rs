@@ -890,16 +890,16 @@ impl RowCell {
 }
 
 /// Continuation rows may be indented by up to this many columns (a hanging indent).
-const HARD_WRAP_MAX_INDENT: usize = 8;
+pub const HARD_WRAP_MAX_INDENT: usize = 8;
 /// Upper bound on rows joined onto one URL.
-const HARD_WRAP_MAX_ROWS: usize = 16;
+pub const HARD_WRAP_MAX_ROWS: usize = 16;
 
-fn has_url_scheme(text: &str) -> bool {
+pub fn has_url_scheme(text: &str) -> bool {
     text.contains("http://") || text.contains("https://")
 }
 
 /// A continuation must look like part of a URL, not a bullet or other decoration.
-fn plausible_url_continuation(token: &str) -> bool {
+pub fn plausible_url_continuation(token: &str) -> bool {
     let Some(first) = token.chars().next() else {
         return false;
     };
