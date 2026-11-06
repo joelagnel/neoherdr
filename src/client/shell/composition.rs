@@ -457,6 +457,44 @@ impl ClientShellState {
             }
         }
         restore_mode_bar(&mut frame, mode_bar, mode_bar_cells.as_deref());
+        let split_tab = snapshot.focused_tab_id.as_deref().is_some_and(|tab_id| {
+            snapshot
+                .panes
+                .iter()
+                .filter(|pane| pane.tab_id == tab_id)
+                .nth(1)
+                .is_some()
+        });
+        let button_area = layout.pane_surface;
+        if split_tab
+            && layout.mobile_header.is_empty()
+            && self.overlay.is_none()
+            && self.mode != ClientShellMode::Navigate
+            && self.config.mouse_capture
+            && button_area.width >= 2
+            && button_area.height >= 2
+        {
+            let zoomed = snapshot
+                .tabs
+                .iter()
+                .any(|tab| tab.zoomed && snapshot.focused_tab_id.as_deref() == Some(&tab.tab_id));
+            let button = Rect::new(button_area.right() - 2, button_area.y, 2, 2);
+            let glyphs = if zoomed {
+                ["▛▜", "▙▟"]
+            } else {
+                ["┌┐", "└┘"]
+            };
+            let palette = &self.config.palette;
+            let style = Style::default().fg(palette.accent).bg(palette.surface_dim);
+            let cursor = frame.cursor.clone();
+            let mut composed = frame.to_ratatui_buffer()?;
+            for (row, glyph) in glyphs.iter().enumerate() {
+                composed.set_string(button.x, button.y + row as u16, glyph, style);
+            }
+            frame.replace_from_ratatui_buffer_preserving_effects(&composed, cursor);
+            occlusion.cover(button);
+            self.hits.pane_zoom_button = button;
+        }
         self.hits.notification_toast = Rect::default();
         let has_config_diagnostic = self.config_diagnostic.is_some();
         let active_lifecycle = self

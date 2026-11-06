@@ -980,6 +980,21 @@ impl ClientShellState {
         if self.popup_terminal_id.is_some() {
             return;
         }
+        if self.overlay.is_none()
+            && super::contains(self.hits.pane_zoom_button, point)
+            && matches!(
+                mouse.kind,
+                MouseEventKind::Down(MouseButton::Left) | MouseEventKind::Up(MouseButton::Left)
+            )
+        {
+            if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
+                self.record_binding(
+                    crate::input::KeybindMatch::Action(crate::input::KeybindAction::Zoom),
+                    outcome,
+                );
+            }
+            return;
+        }
         if self.config.mouse_capture
             && !self.replaying_url_click
             && self.overlay.is_none()
