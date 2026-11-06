@@ -9,6 +9,7 @@ pub(super) struct EndpointAgentPresentation {
     acknowledged: HashMap<String, u64>,
     completed: HashMap<String, u64>,
     working: HashSet<String>,
+    done_logged: HashSet<String>,
     /// When each completion was acknowledged: pane id to a counter value, so the
     /// most recently seen finished work can be listed first among idle entries.
     seen_order: HashMap<String, u64>,
@@ -55,11 +56,18 @@ impl EndpointAgentPresentation {
             self.completed.clear();
             self.working.clear();
             self.seen_order.clear();
+            self.done_logged.clear();
             self.acknowledged.extend(
                 snapshot
                     .agents
                     .iter()
                     .map(|agent| (agent.pane_id.clone(), agent.state_change_seq)),
+            );
+            tracing::info!(
+                boot_id = %snapshot.boot_id,
+                revision = snapshot.revision,
+                agents = snapshot.agents.len(),
+                "agent presentation baseline seeded"
             );
         }
         let pane_ids: HashSet<&str> = snapshot
@@ -67,6 +75,19 @@ impl EndpointAgentPresentation {
             .iter()
             .map(|agent| agent.pane_id.as_str())
             .collect();
+        let dropped: Vec<&str> = self
+            .acknowledged
+            .keys()
+            .filter(|pane_id| !pane_ids.contains(pane_id.as_str()))
+            .map(String::as_str)
+            .collect();
+        if !dropped.is_empty() {
+            tracing::info!(
+                revision = snapshot.revision,
+                panes = ?dropped,
+                "agent presentation lost acknowledgements for panes missing from snapshot"
+            );
+        }
         self.acknowledged
             .retain(|pane_id, _| pane_ids.contains(pane_id.as_str()));
         self.completed
@@ -84,7 +105,9 @@ impl EndpointAgentPresentation {
                     && projection.revision == snapshot.revision
             })
             .map(|(_, projection)| projection.completions);
+        let completions_received = completions.is_some();
         for agent in &mut snapshot.agents {
+            let mut observed_work = false;
             match agent.agent_status {
                 AgentStatus::Working => {
                     self.working.insert(agent.pane_id.clone());
@@ -94,7 +117,7 @@ impl EndpointAgentPresentation {
                     self.completed.remove(&agent.pane_id);
                 }
                 AgentStatus::Idle | AgentStatus::Done => {
-                    let observed_work = self.working.remove(&agent.pane_id);
+                    observed_work = self.working.remove(&agent.pane_id);
                     let completed = completions.as_ref().map_or_else(
                         || {
                             observed_work
@@ -118,6 +141,20 @@ impl EndpointAgentPresentation {
                 }
             }
             agent.agent_status = self.projected_status(agent);
+            if agent.agent_status != AgentStatus::Done {
+                self.done_logged.remove(&agent.pane_id);
+            } else if self.done_logged.insert(agent.pane_id.clone()) {
+                tracing::info!(
+                    pane_id = %agent.pane_id,
+                    revision = snapshot.revision,
+                    state_change_seq = agent.state_change_seq,
+                    acknowledged_seq = ?self.acknowledged.get(&agent.pane_id),
+                    completed_seq = ?self.completed.get(&agent.pane_id),
+                    observed_work,
+                    completions_received,
+                    "agent pane projected as done"
+                );
+            }
         }
         project_aggregate_status(snapshot);
         self.publish_seen_order(snapshot);
