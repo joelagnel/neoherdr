@@ -465,20 +465,16 @@ impl ClientShellState {
                 .nth(1)
                 .is_some()
         });
-        let button_area = layout.pane_surface;
         if split_tab
             && layout.mobile_header.is_empty()
             && self.overlay.is_none()
             && self.mode != ClientShellMode::Navigate
             && self.config.mouse_capture
-            && button_area.width >= 2
-            && button_area.height >= 2
         {
             let zoomed = snapshot
                 .tabs
                 .iter()
                 .any(|tab| tab.zoomed && snapshot.focused_tab_id.as_deref() == Some(&tab.tab_id));
-            let button = Rect::new(button_area.right() - 2, button_area.y, 2, 2);
             let glyphs = if zoomed {
                 ["▛▜", "▙▟"]
             } else {
@@ -488,12 +484,20 @@ impl ClientShellState {
             let style = Style::default().fg(palette.accent).bg(palette.surface_dim);
             let cursor = frame.cursor.clone();
             let mut composed = frame.to_ratatui_buffer()?;
-            for (row, glyph) in glyphs.iter().enumerate() {
-                composed.set_string(button.x, button.y + row as u16, glyph, style);
+            for hit in &self.hits.panes {
+                if hit.rect.width < 2 || hit.rect.height < 2 {
+                    continue;
+                }
+                let button = Rect::new(hit.rect.right() - 2, hit.rect.y, 2, 2);
+                for (row, glyph) in glyphs.iter().enumerate() {
+                    composed.set_string(button.x, button.y + row as u16, glyph, style);
+                }
+                occlusion.cover(button);
+                self.hits
+                    .pane_zoom_buttons
+                    .push((button, hit.pane_id.clone()));
             }
             frame.replace_from_ratatui_buffer_preserving_effects(&composed, cursor);
-            occlusion.cover(button);
-            self.hits.pane_zoom_button = button;
         }
         self.hits.notification_toast = Rect::default();
         let has_config_diagnostic = self.config_diagnostic.is_some();

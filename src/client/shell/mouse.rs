@@ -980,15 +980,23 @@ impl ClientShellState {
         if self.popup_terminal_id.is_some() {
             return;
         }
-        if self.overlay.is_none()
-            && mouse.kind == MouseEventKind::Down(MouseButton::Left)
-            && super::contains(self.hits.pane_zoom_button, point)
-        {
-            self.record_binding(
-                crate::input::KeybindMatch::Action(crate::input::KeybindAction::Zoom),
-                outcome,
-            );
-            return;
+        if self.overlay.is_none() && mouse.kind == MouseEventKind::Down(MouseButton::Left) {
+            if let Some(pane_id) = self
+                .hits
+                .pane_zoom_buttons
+                .iter()
+                .find(|(rect, _)| super::contains(*rect, point))
+                .map(|(_, pane_id)| pane_id.clone())
+            {
+                self.push_endpoint_method(
+                    crate::api::schema::Method::PaneZoom(crate::api::schema::PaneZoomParams {
+                        pane_id: Some(pane_id),
+                        mode: crate::api::schema::PaneZoomMode::Toggle,
+                    }),
+                    outcome,
+                );
+                return;
+            }
         }
         if self.config.mouse_capture
             && !self.replaying_url_click

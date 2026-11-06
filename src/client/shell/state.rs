@@ -104,7 +104,7 @@ pub(super) struct ShellHitMap {
     pub(super) panes: Vec<PaneHit>,
     pub(super) popup: Option<PaneHit>,
     pub(super) pane_splits: Vec<PaneSplitHit>,
-    pub(super) pane_zoom_button: Rect,
+    pub(super) pane_zoom_buttons: Vec<(Rect, String)>,
     pub(super) agents: Vec<(Rect, String)>,
     pub(super) endpoint_agents: Vec<(Rect, ClientEndpointId, String)>,
     pub(super) agent_body: Rect,
