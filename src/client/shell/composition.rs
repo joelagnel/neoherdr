@@ -466,7 +466,7 @@ impl ClientShellState {
                 .is_some()
         });
         if split_tab
-            && layout.mobile_header.is_empty()
+            && !self.mobile_menu_open
             && self.overlay.is_none()
             && self.mode != ClientShellMode::Navigate
             && self.config.mouse_capture

@@ -91,16 +91,27 @@ fn zoomed_pane_keeps_the_button_while_other_splits_are_hidden() {
 }
 
 #[test]
-fn single_pane_and_mobile_layouts_have_no_button() {
+fn single_pane_tabs_have_no_button() {
     let mut single = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
     single.set_snapshot(Box::new(snapshot()));
     single.set_pane_surface(surface());
     single.compose(106, 24).unwrap();
     assert!(single.hits.pane_zoom_buttons.is_empty());
+}
 
+#[test]
+fn mobile_layout_shows_the_button_and_zooms_on_tap() {
     let mut mobile = split_state(false);
     mobile.compose(44, 30).unwrap();
-    assert!(mobile.hits.pane_zoom_buttons.is_empty());
+    assert!(!mobile.layout(44, 30).mobile_header.is_empty());
+    let (button, pane_id) = mobile.hits.pane_zoom_buttons[0].clone();
+    let outcome = click(&mut mobile, button);
+    let zoomed = outcome.actions.iter().any(|action| {
+        matches!(action, ClientShellAction::Endpoint { request, .. }
+            if matches!(&request.method, Method::PaneZoom(params)
+                if params.pane_id.as_deref() == Some(pane_id.as_str())))
+    });
+    assert!(zoomed);
 }
 
 #[test]
