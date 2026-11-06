@@ -653,6 +653,25 @@ impl ClientShellState {
         }
     }
 
+    pub(super) fn mark_active_agent_done(&mut self, pane_id: &str) -> bool {
+        let Some(index) = self
+            .endpoints
+            .iter()
+            .position(|endpoint| endpoint.endpoint_id == self.active_endpoint_id)
+        else {
+            return false;
+        };
+        let endpoint = &mut self.endpoints[index];
+        let Some(snapshot) = endpoint.snapshot.as_deref_mut() else {
+            return false;
+        };
+        let changed = endpoint.agent_presentation.mark_done(snapshot, pane_id);
+        if changed {
+            self.snapshot = self.endpoints[index].snapshot.clone();
+        }
+        changed
+    }
+
     pub(crate) fn acknowledge_active_surface_agents(&mut self, surface: &PaneSurfaceFrame) -> bool {
         let Some(index) = self
             .endpoints

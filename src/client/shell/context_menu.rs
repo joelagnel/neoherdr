@@ -50,6 +50,11 @@ impl ClientContextMenuOverlay {
                 item("Rename", Action::Rename),
                 item("Close", Action::Close),
             ],
+            ClientContextMenuTarget::Agent { .. } => vec![
+                item("Rename", Action::RenamePane),
+                item("Close", Action::ClosePane),
+                item("Mark as done", Action::MarkAgentDone),
+            ],
             ClientContextMenuTarget::Pane {
                 source_pane_id,
                 has_manual_label,
@@ -142,6 +147,27 @@ impl ClientShellState {
         }));
     }
 
+    pub(super) fn open_agent_context_menu(&mut self, pane_id: String, x: u16, y: u16) {
+        let Some(workspace_id) = self.snapshot.as_deref().and_then(|snapshot| {
+            snapshot
+                .agents
+                .iter()
+                .find(|agent| agent.pane_id == pane_id)
+                .map(|agent| agent.workspace_id.clone())
+        }) else {
+            return;
+        };
+        self.overlay = Some(ClientShellOverlay::ContextMenu(ClientContextMenuOverlay {
+            target: ClientContextMenuTarget::Agent {
+                pane_id,
+                workspace_id,
+            },
+            x,
+            y,
+            highlighted: 0,
+        }));
+    }
+
     pub(super) fn open_pane_context_menu(&mut self, pane_id: String, x: u16, y: u16) {
         let Some(snapshot) = self.snapshot.as_deref() else {
             return;
@@ -201,6 +227,23 @@ impl ClientShellState {
                 tab_id,
                 workspace_id,
             } => self.activate_tab_context_action(tab_id, workspace_id, action, outcome),
+            ClientContextMenuTarget::Agent {
+                pane_id,
+                workspace_id,
+            } => {
+                if action == ClientContextMenuAction::MarkAgentDone {
+                    self.mark_active_agent_done(&pane_id);
+                } else {
+                    self.activate_pane_context_action(
+                        pane_id,
+                        workspace_id,
+                        None,
+                        false,
+                        action,
+                        outcome,
+                    );
+                }
+            }
             ClientContextMenuTarget::Pane {
                 pane_id,
                 workspace_id,

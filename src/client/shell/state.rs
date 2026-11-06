@@ -547,6 +547,7 @@ pub(super) enum ClientContextMenuAction {
     Zoom,
     ToggleRightClickPassthrough,
     ClosePane,
+    MarkAgentDone,
 }
 
 #[derive(Debug)]
@@ -561,6 +562,10 @@ pub(super) enum ClientContextMenuTarget {
     },
     Tab {
         tab_id: String,
+        workspace_id: String,
+    },
+    Agent {
+        pane_id: String,
         workspace_id: String,
     },
     Pane {

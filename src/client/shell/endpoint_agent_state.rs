@@ -10,6 +10,8 @@ pub(super) struct EndpointAgentPresentation {
     completed: HashMap<String, u64>,
     working: HashSet<String>,
     done_logged: HashSet<String>,
+    /// Panes the user marked as done, with the state sequence they were marked at.
+    manual_done: HashMap<String, u64>,
     /// When each completion was acknowledged: pane id to a counter value, so the
     /// most recently seen finished work can be listed first among idle entries.
     seen_order: HashMap<String, u64>,
@@ -57,6 +59,7 @@ impl EndpointAgentPresentation {
             self.working.clear();
             self.seen_order.clear();
             self.done_logged.clear();
+            self.manual_done.clear();
             self.acknowledged.extend(
                 snapshot
                     .agents
@@ -94,6 +97,8 @@ impl EndpointAgentPresentation {
             .retain(|pane_id, _| pane_ids.contains(pane_id.as_str()));
         self.working
             .retain(|pane_id| pane_ids.contains(pane_id.as_str()));
+        self.manual_done
+            .retain(|pane_id, _| pane_ids.contains(pane_id.as_str()));
         self.seen_order
             .retain(|pane_id, _| pane_ids.contains(pane_id.as_str()));
         let completions = self
@@ -118,16 +123,22 @@ impl EndpointAgentPresentation {
                 }
                 AgentStatus::Idle | AgentStatus::Done => {
                     observed_work = self.working.remove(&agent.pane_id);
-                    let completed = completions.as_ref().map_or_else(
-                        || {
-                            observed_work
-                                || self.completed.get(&agent.pane_id)
-                                    == Some(&agent.state_change_seq)
-                        },
-                        |completions| {
-                            completions.get(&agent.pane_id) == Some(&agent.state_change_seq)
-                        },
-                    );
+                    let marked =
+                        self.manual_done.get(&agent.pane_id) == Some(&agent.state_change_seq);
+                    if !marked {
+                        self.manual_done.remove(&agent.pane_id);
+                    }
+                    let completed = marked
+                        || completions.as_ref().map_or_else(
+                            || {
+                                observed_work
+                                    || self.completed.get(&agent.pane_id)
+                                        == Some(&agent.state_change_seq)
+                            },
+                            |completions| {
+                                completions.get(&agent.pane_id) == Some(&agent.state_change_seq)
+                            },
+                        );
                     if completed {
                         self.completed
                             .insert(agent.pane_id.clone(), agent.state_change_seq);
@@ -139,6 +150,9 @@ impl EndpointAgentPresentation {
                     self.working.remove(&agent.pane_id);
                     self.completed.remove(&agent.pane_id);
                 }
+            }
+            if !matches!(agent.agent_status, AgentStatus::Idle | AgentStatus::Done) {
+                self.manual_done.remove(&agent.pane_id);
             }
             agent.agent_status = self.projected_status(agent);
             if agent.agent_status != AgentStatus::Done {
@@ -202,6 +216,9 @@ impl EndpointAgentPresentation {
             else {
                 continue;
             };
+            if self.manual_done.contains_key(&agent.pane_id) {
+                continue;
+            }
             let was_unseen_completion =
                 !self.seen(agent) && self.completed.contains_key(&agent.pane_id);
             let acknowledged = self.acknowledged.entry(agent.pane_id.clone()).or_default();
@@ -223,6 +240,28 @@ impl EndpointAgentPresentation {
             self.publish_seen_order(snapshot);
         }
         changed
+    }
+
+    /// Presents an idle agent as finished-but-unseen, like marking mail unread.
+    pub(super) fn mark_done(&mut self, snapshot: &mut ClientShellSnapshot, pane_id: &str) -> bool {
+        let Some(agent) = snapshot
+            .agents
+            .iter()
+            .find(|agent| agent.pane_id == pane_id)
+            .filter(|agent| matches!(agent.agent_status, AgentStatus::Idle | AgentStatus::Done))
+        else {
+            return false;
+        };
+        let sequence = agent.state_change_seq;
+        self.manual_done.insert(pane_id.to_owned(), sequence);
+        self.completed.insert(pane_id.to_owned(), sequence);
+        self.acknowledged.remove(pane_id);
+        for agent in &mut snapshot.agents {
+            agent.agent_status = self.projected_status(agent);
+        }
+        project_aggregate_status(snapshot);
+        self.publish_seen_order(snapshot);
+        true
     }
 
     pub(super) fn seen(&self, agent: &ClientShellAgent) -> bool {
@@ -492,6 +531,41 @@ mod tests {
         presentation.project_snapshot(&mut completed);
 
         assert_eq!(completed.agents[0].agent_status, AgentStatus::Done);
+    }
+
+    #[test]
+    fn marked_done_agent_stays_done_until_its_state_changes() {
+        let mut presentation = EndpointAgentPresentation::default();
+        let mut baseline = snapshot(AgentStatus::Idle, 4, 1);
+        presentation.project_snapshot(&mut baseline);
+        assert_eq!(baseline.agents[0].agent_status, AgentStatus::Idle);
+
+        assert!(presentation.mark_done(&mut baseline, "agent-pane"));
+        assert_eq!(baseline.agents[0].agent_status, AgentStatus::Done);
+
+        let mut same = snapshot(AgentStatus::Idle, 4, 2);
+        presentation.receive_completions(None, completions("endpoint-boot", 2, None));
+        presentation.project_snapshot(&mut same);
+        assert_eq!(same.agents[0].agent_status, AgentStatus::Done);
+        assert!(!presentation.acknowledge_surface(&mut same, &surface(2), None));
+        assert_eq!(same.agents[0].agent_status, AgentStatus::Done);
+
+        let mut working = snapshot(AgentStatus::Working, 5, 3);
+        presentation.project_snapshot(&mut working);
+        let mut idle = snapshot(AgentStatus::Idle, 6, 4);
+        presentation.project_snapshot(&mut idle);
+        assert_eq!(idle.agents[0].agent_status, AgentStatus::Done);
+        assert!(presentation.acknowledge_surface(&mut idle, &surface(4), Some(true)));
+        assert_eq!(idle.agents[0].agent_status, AgentStatus::Idle);
+    }
+
+    #[test]
+    fn working_agents_cannot_be_marked_done() {
+        let mut presentation = EndpointAgentPresentation::default();
+        let mut snapshot = snapshot(AgentStatus::Working, 4, 1);
+        presentation.project_snapshot(&mut snapshot);
+        assert!(!presentation.mark_done(&mut snapshot, "agent-pane"));
+        assert_eq!(snapshot.agents[0].agent_status, AgentStatus::Working);
     }
 
     #[test]
