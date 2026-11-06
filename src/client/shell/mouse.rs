@@ -981,18 +981,13 @@ impl ClientShellState {
             return;
         }
         if self.overlay.is_none()
+            && mouse.kind == MouseEventKind::Down(MouseButton::Left)
             && super::contains(self.hits.pane_zoom_button, point)
-            && matches!(
-                mouse.kind,
-                MouseEventKind::Down(MouseButton::Left) | MouseEventKind::Up(MouseButton::Left)
-            )
         {
-            if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
-                self.record_binding(
-                    crate::input::KeybindMatch::Action(crate::input::KeybindAction::Zoom),
-                    outcome,
-                );
-            }
+            self.record_binding(
+                crate::input::KeybindMatch::Action(crate::input::KeybindAction::Zoom),
+                outcome,
+            );
             return;
         }
         if self.config.mouse_capture
