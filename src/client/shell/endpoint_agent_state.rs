@@ -12,6 +12,8 @@ pub(super) struct EndpointAgentPresentation {
     done_logged: HashSet<String>,
     /// Panes the user marked as done, with the state sequence they were marked at.
     manual_done: HashMap<String, u64>,
+    /// Marked panes that have left the presented surface since being marked.
+    manual_away: HashSet<String>,
     /// When each completion was acknowledged: pane id to a counter value, so the
     /// most recently seen finished work can be listed first among idle entries.
     seen_order: HashMap<String, u64>,
@@ -207,6 +209,16 @@ impl EndpointAgentPresentation {
             return false;
         }
 
+        let presented: HashSet<&str> = surface
+            .panes
+            .iter()
+            .map(|pane| pane.pane_id.as_str())
+            .collect();
+        for pane_id in self.manual_done.keys() {
+            if !presented.contains(pane_id.as_str()) {
+                self.manual_away.insert(pane_id.clone());
+            }
+        }
         let mut changed = false;
         for pane in &surface.panes {
             let Some(agent) = snapshot
@@ -217,7 +229,11 @@ impl EndpointAgentPresentation {
                 continue;
             };
             if self.manual_done.contains_key(&agent.pane_id) {
-                continue;
+                if self.manual_away.remove(&agent.pane_id) {
+                    self.manual_done.remove(&agent.pane_id);
+                } else {
+                    continue;
+                }
             }
             let was_unseen_completion =
                 !self.seen(agent) && self.completed.contains_key(&agent.pane_id);
@@ -254,6 +270,7 @@ impl EndpointAgentPresentation {
         };
         let sequence = agent.state_change_seq;
         self.manual_done.insert(pane_id.to_owned(), sequence);
+        self.manual_away.remove(pane_id);
         self.completed.insert(pane_id.to_owned(), sequence);
         self.acknowledged.remove(pane_id);
         for agent in &mut snapshot.agents {
@@ -549,6 +566,17 @@ mod tests {
         assert_eq!(same.agents[0].agent_status, AgentStatus::Done);
         assert!(!presentation.acknowledge_surface(&mut same, &surface(2), None));
         assert_eq!(same.agents[0].agent_status, AgentStatus::Done);
+        // Still presented since it was marked: not a visit.
+        assert!(!presentation.acknowledge_surface(&mut same, &surface(2), Some(true)));
+        assert_eq!(same.agents[0].agent_status, AgentStatus::Done);
+        // Leave, then visit: the mark clears like any unseen completion.
+        let mut away = surface(2);
+        away.panes.clear();
+        assert!(!presentation.acknowledge_surface(&mut same, &away, Some(true)));
+        assert_eq!(same.agents[0].agent_status, AgentStatus::Done);
+        assert!(presentation.acknowledge_surface(&mut same, &surface(2), Some(true)));
+        assert_eq!(same.agents[0].agent_status, AgentStatus::Idle);
+        assert!(presentation.mark_done(&mut same, "agent-pane"));
 
         let mut working = snapshot(AgentStatus::Working, 5, 3);
         presentation.project_snapshot(&mut working);
