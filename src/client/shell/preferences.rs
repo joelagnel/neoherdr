@@ -19,6 +19,8 @@ pub(super) struct ClientRecentPreference {
     pub(super) endpoint: String,
     pub(super) pane_id: String,
     pub(super) at: u64,
+    #[serde(default)]
+    pub(super) boot_id: String,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]

@@ -129,10 +129,7 @@ fn recent_view_renders_the_age_column_first() {
         .find(|c| ['●', '○', '◐', '◉'].contains(&c))
         .unwrap_or(usize::MAX);
     assert!(age < dot, "age column comes before the status dot: {row}");
-    assert!(
-        text.contains("2d ago") || text.contains("5h ago") || text.contains("3d"),
-        "{text}"
-    );
+    assert!(text.contains("2d ago"), "{text}");
 }
 
 #[test]
@@ -230,5 +227,32 @@ fn desktop_menu_button_recent_item_opens_the_recent_view() {
     match state.overlay.as_ref() {
         Some(ClientShellOverlay::Navigator(navigator)) => assert!(navigator.recent.is_some()),
         _ => panic!("recent view opens"),
+    }
+}
+
+#[test]
+fn entries_from_an_earlier_server_run_are_not_shown() {
+    let mut state = recent_state(2);
+    focus(&mut state, "pane_1", 1_000);
+    focus(&mut state, "pane_2", 2_000);
+    let mut restarted = state.snapshot.as_deref().unwrap().clone();
+    restarted.boot_id = "boot-2".into();
+    restarted.revision = 1;
+    state.set_snapshot(Box::new(restarted));
+    state.open_recent_overlay_at(3_000);
+    assert!(recent_rows(&state).is_empty());
+}
+
+#[test]
+fn recent_starts_on_the_previous_pane_not_the_focused_one() {
+    let mut state = recent_state(2);
+    focus(&mut state, "pane_1", 1_000);
+    focus(&mut state, "pane_2", 2_000);
+    state.open_recent_overlay_at(3_000);
+    match state.overlay.as_ref() {
+        Some(ClientShellOverlay::Navigator(navigator)) => {
+            assert_eq!(navigator.selected, Some(pane_target("pane_1")));
+        }
+        _ => panic!("recent overlay"),
     }
 }

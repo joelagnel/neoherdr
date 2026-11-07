@@ -12,6 +12,8 @@ pub(super) struct ClientRecentAccess {
     pub(super) endpoint_id: ClientEndpointId,
     pub(super) pane_id: String,
     pub(super) at: u64,
+    /// Server run that issued the pane id; ids are reused after a restart.
+    pub(super) boot_id: String,
 }
 
 /// One access as shown by the Recent view, with its age fixed when the view opened.
@@ -54,6 +56,7 @@ pub(super) fn restore_recent_access(
                 endpoint_id,
                 pane_id: entry.pane_id.clone(),
                 at: entry.at,
+                boot_id: entry.boot_id.clone(),
             })
         })
         .collect::<Vec<_>>();
@@ -70,6 +73,7 @@ pub(super) fn recent_preferences(
             endpoint: entry.endpoint_id.storage_key(),
             pane_id: entry.pane_id.clone(),
             at: entry.at,
+            boot_id: entry.boot_id.clone(),
         })
         .collect()
 }
@@ -123,6 +127,11 @@ impl ClientShellState {
                 endpoint_id: key.0.clone(),
                 pane_id: key.1.clone(),
                 at: now,
+                boot_id: self
+                    .snapshot
+                    .as_deref()
+                    .map(|snapshot| snapshot.boot_id.clone())
+                    .unwrap_or_default(),
             },
         );
         self.recent_access.truncate(RECENT_LOG_CAP);
@@ -138,6 +147,15 @@ impl ClientShellState {
         let entries = self
             .recent_access
             .iter()
+            .filter(|entry| {
+                self.endpoints.iter().any(|endpoint| {
+                    endpoint.endpoint_id == entry.endpoint_id
+                        && endpoint
+                            .snapshot
+                            .as_deref()
+                            .is_some_and(|snapshot| snapshot.boot_id == entry.boot_id)
+                })
+            })
             .map(|entry| ClientRecentEntry {
                 endpoint_id: entry.endpoint_id.clone(),
                 pane_id: entry.pane_id.clone(),
@@ -145,5 +163,19 @@ impl ClientShellState {
             })
             .collect();
         self.open_navigator_overlay_scoped(None, Some(entries));
+        // Start on the previous pane: the newest row is the one already focused.
+        if let Some(ClientShellOverlay::Navigator(navigator)) = self.overlay.as_ref() {
+            let rows = super::aggregate_navigation::navigator_rows(
+                &self.endpoints,
+                &self.active_endpoint_id,
+                navigator,
+            );
+            let target = rows.get(1).map(|row| row.target.clone());
+            if let (Some(target), Some(ClientShellOverlay::Navigator(navigator))) =
+                (target, self.overlay.as_mut())
+            {
+                navigator.selected = Some(target);
+            }
+        }
     }
 }
