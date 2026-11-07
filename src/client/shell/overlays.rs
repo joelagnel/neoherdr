@@ -79,7 +79,9 @@ pub(crate) fn render_client_overlay(
         ClientShellOverlay::WorktreeRemove(v) => {
             worktree_overlays::render_worktree_remove_overlay(b, v, p)
         }
-        ClientShellOverlay::ContextMenu(_) | ClientShellOverlay::GlobalMenu(_) => None,
+        ClientShellOverlay::ContextMenu(_)
+        | ClientShellOverlay::TabOverflow(_)
+        | ClientShellOverlay::GlobalMenu(_) => None,
     }
 }
 
@@ -209,6 +211,98 @@ pub(crate) fn render_context_menu(
         };
         buffer.set_style(row, style);
         put_text(buffer, row.x, row.y, row.width, item.label, style);
+        rows.push((row, index));
+    }
+    Some(OverlayRender {
+        area: rect,
+        menu_rows: rows,
+        ..OverlayRender::default()
+    })
+}
+
+pub(crate) fn render_tab_overflow_menu(
+    buffer: &mut Buffer,
+    menu: &ClientTabOverflowOverlay,
+    palette: &Palette,
+) -> Option<OverlayRender> {
+    let screen = buffer.area;
+    let width = menu
+        .items
+        .iter()
+        .map(|item| display_width(&item.label))
+        .max()
+        .unwrap_or(0)
+        .saturating_add(6)
+        .max(12)
+        .min(screen.width.max(1));
+    let wanted = (menu.items.len() as u16).saturating_add(2);
+    let below = screen
+        .bottom()
+        .saturating_sub(menu.anchor_y.saturating_add(1));
+    let above = menu.anchor_y.saturating_sub(screen.y);
+    let (height, y) = if wanted <= below || below >= above {
+        (wanted.min(below), menu.anchor_y.saturating_add(1))
+    } else {
+        let height = wanted.min(above);
+        (height, menu.anchor_y.saturating_sub(height))
+    };
+    let x = menu
+        .anchor_x
+        .min(screen.x.saturating_add(screen.width.saturating_sub(width)));
+    let rect = Rect::new(x, y, width, height);
+    let inner = panel(buffer, rect, palette.accent, palette.panel_bg)?;
+    let visible = usize::from(inner.height);
+    let scroll = menu.scroll.min(menu.items.len().saturating_sub(visible));
+    let mut rows = Vec::new();
+    for (offset, (index, item)) in menu
+        .items
+        .iter()
+        .enumerate()
+        .skip(scroll)
+        .take(visible)
+        .enumerate()
+    {
+        let row = Rect::new(
+            inner.x,
+            inner.y.saturating_add(offset as u16),
+            inner.width,
+            1,
+        );
+        let style = if index == menu.highlighted {
+            Style::default()
+                .fg(panel_contrast_fg(palette))
+                .bg(palette.accent)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(palette.text).bg(palette.panel_bg)
+        };
+        buffer.set_style(row, style);
+        let marker = if item.focused { "▸ " } else { "  " };
+        put_text(
+            buffer,
+            row.x,
+            row.y,
+            row.width,
+            &format!("{marker}{}", item.label),
+            style,
+        );
+        let arrow = if offset == 0 && scroll > 0 {
+            "▲"
+        } else if offset + 1 == visible && scroll + visible < menu.items.len() {
+            "▼"
+        } else {
+            ""
+        };
+        if !arrow.is_empty() {
+            put_text(
+                buffer,
+                row.right().saturating_sub(1),
+                row.y,
+                1,
+                arrow,
+                style,
+            );
+        }
         rows.push((row, index));
     }
     Some(OverlayRender {

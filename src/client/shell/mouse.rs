@@ -1467,6 +1467,42 @@ impl ClientShellState {
             }
             return;
         }
+        if matches!(self.overlay, Some(ClientShellOverlay::TabOverflow(_))) {
+            let row_hit = self
+                .hits
+                .tab_overflow_rows
+                .iter()
+                .find(|(rect, _)| super::contains(*rect, point))
+                .copied();
+            match mouse.kind {
+                MouseEventKind::Moved => {
+                    if let (Some((_, index)), Some(ClientShellOverlay::TabOverflow(menu))) =
+                        (row_hit, self.overlay.as_mut())
+                    {
+                        menu.highlighted = index;
+                        outcome.repaint = true;
+                    }
+                }
+                MouseEventKind::ScrollUp => {
+                    self.scroll_tab_overflow(-1);
+                    outcome.repaint = true;
+                }
+                MouseEventKind::ScrollDown => {
+                    self.scroll_tab_overflow(1);
+                    outcome.repaint = true;
+                }
+                MouseEventKind::Down(MouseButton::Left) => {
+                    if let Some((_, index)) = row_hit {
+                        self.activate_tab_overflow_item(index, outcome);
+                    } else {
+                        self.overlay = None;
+                        outcome.repaint = true;
+                    }
+                }
+                _ => {}
+            }
+            return;
+        }
         if matches!(self.overlay, Some(ClientShellOverlay::ContextMenu(_))) {
             let row_hit = self
                 .hits
@@ -2139,6 +2175,11 @@ impl ClientShellState {
                         crate::input::KeybindMatch::Action(crate::input::KeybindAction::NewTab),
                         outcome,
                     );
+                    return;
+                }
+                if super::contains(self.hits.tab_overflow, point) {
+                    self.open_tab_overflow_menu();
+                    outcome.repaint = true;
                     return;
                 }
                 if super::contains(self.hits.tab_scroll_left, point) {

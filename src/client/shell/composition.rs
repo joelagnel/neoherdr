@@ -346,6 +346,7 @@ impl ClientShellState {
             self.hits.new_tab = Rect::default();
             self.hits.tab_scroll_left = Rect::default();
             self.hits.tab_scroll_right = Rect::default();
+            self.hits.tab_overflow = Rect::default();
         }
         let mut frame = FrameData::from_ratatui_buffer_with_hyperlinks(&buffer, None, &[]);
         let mode_bar_cells = mode_bar.map(|bar| {
@@ -712,6 +713,12 @@ impl ClientShellState {
                     render::render_context_menu(&mut composed, menu, &self.config.palette)?;
                 occlusion.cover(rendered.area);
                 self.hits.context_menu_rows = rendered.menu_rows;
+                None
+            } else if let ClientShellOverlay::TabOverflow(menu) = overlay {
+                let rendered =
+                    render::render_tab_overflow_menu(&mut composed, menu, &self.config.palette)?;
+                occlusion.cover(rendered.area);
+                self.hits.tab_overflow_rows = rendered.menu_rows;
                 None
             } else if let ClientShellOverlay::GlobalMenu(menu) = overlay {
                 let rendered = render::render_global_menu(

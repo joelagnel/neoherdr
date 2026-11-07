@@ -637,6 +637,40 @@ impl ClientShellState {
             return;
         }
 
+        if matches!(self.overlay, Some(ClientShellOverlay::TabOverflow(_))) {
+            match key.code {
+                KeyCode::Esc => {
+                    self.overlay = None;
+                    outcome.repaint = true;
+                }
+                KeyCode::Up => {
+                    self.move_tab_overflow_selection(-1);
+                    outcome.repaint = true;
+                }
+                KeyCode::Down => {
+                    self.move_tab_overflow_selection(1);
+                    outcome.repaint = true;
+                }
+                KeyCode::PageUp => {
+                    self.move_tab_overflow_selection(-(self.hits.tab_overflow_rows.len() as isize));
+                    outcome.repaint = true;
+                }
+                KeyCode::PageDown => {
+                    self.move_tab_overflow_selection(self.hits.tab_overflow_rows.len() as isize);
+                    outcome.repaint = true;
+                }
+                KeyCode::Enter => {
+                    let highlighted = match self.overlay.as_ref() {
+                        Some(ClientShellOverlay::TabOverflow(menu)) => menu.highlighted,
+                        _ => return,
+                    };
+                    self.activate_tab_overflow_item(highlighted, outcome);
+                }
+                _ => {}
+            }
+            return;
+        }
+
         if matches!(self.overlay, Some(ClientShellOverlay::ContextMenu(_))) {
             match key.code {
                 KeyCode::Esc => {

@@ -120,6 +120,8 @@ pub(super) struct ShellHitMap {
     pub(super) new_tab: Rect,
     pub(super) tab_scroll_left: Rect,
     pub(super) tab_scroll_right: Rect,
+    pub(super) tab_overflow: Rect,
+    pub(super) tab_overflow_rows: Vec<(Rect, usize)>,
     pub(super) mobile_menu: Rect,
     pub(super) mobile_side: Rect,
     pub(super) mobile_menu_panel: Rect,
@@ -311,6 +313,7 @@ pub(super) enum ClientShellOverlayKind {
     WorktreeOpen,
     WorktreeRemove,
     ContextMenu,
+    TabOverflow,
     GlobalMenu,
     Settings,
 }
@@ -401,6 +404,22 @@ pub(super) struct ClientNavigatorOverlay {
 pub(super) struct ClientHelpOverlay {
     pub(super) query: TextEditor,
     pub(super) search_focused: bool,
+    pub(super) scroll: usize,
+}
+
+#[derive(Debug)]
+pub(super) struct ClientTabOverflowItem {
+    pub(super) tab_id: String,
+    pub(super) label: String,
+    pub(super) focused: bool,
+}
+
+#[derive(Debug)]
+pub(super) struct ClientTabOverflowOverlay {
+    pub(super) items: Vec<ClientTabOverflowItem>,
+    pub(super) anchor_x: u16,
+    pub(super) anchor_y: u16,
+    pub(super) highlighted: usize,
     pub(super) scroll: usize,
 }
 
@@ -625,6 +644,7 @@ pub(super) enum ClientShellOverlay {
     WorktreeOpen(ClientWorktreeOpenOverlay),
     WorktreeRemove(ClientWorktreeRemoveOverlay),
     ContextMenu(ClientContextMenuOverlay),
+    TabOverflow(ClientTabOverflowOverlay),
     GlobalMenu(ClientGlobalMenuOverlay),
     Settings(ClientSettingsOverlay),
 }
@@ -643,6 +663,7 @@ impl ClientShellOverlay {
             Self::WorktreeOpen(_) => ClientShellOverlayKind::WorktreeOpen,
             Self::WorktreeRemove(_) => ClientShellOverlayKind::WorktreeRemove,
             Self::ContextMenu(_) => ClientShellOverlayKind::ContextMenu,
+            Self::TabOverflow(_) => ClientShellOverlayKind::TabOverflow,
             Self::GlobalMenu(_) => ClientShellOverlayKind::GlobalMenu,
             Self::Settings(_) => ClientShellOverlayKind::Settings,
         }

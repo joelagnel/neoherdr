@@ -269,4 +269,5 @@ mod recent;
 mod sidebar_buttons;
 mod startup_overlays;
 mod status_order;
+mod tab_overflow;
 mod zoom_button;

@@ -1,8 +1,11 @@
 use super::*;
 
 const TAB_SCROLL_BUTTON_WIDTH: u16 = 3;
-const MIN_TAB_STRIP_WIDTH: u16 =
-    MIN_TAB_WIDTH + NEW_TAB_WIDTH + TAB_SCROLL_BUTTON_WIDTH.saturating_mul(2);
+const TAB_OVERFLOW_BUTTON_WIDTH: u16 = 4;
+const MIN_TAB_STRIP_WIDTH: u16 = MIN_TAB_WIDTH
+    + NEW_TAB_WIDTH
+    + TAB_SCROLL_BUTTON_WIDTH.saturating_mul(2)
+    + TAB_OVERFLOW_BUTTON_WIDTH;
 
 pub(crate) fn render_tab_bar(
     buffer: &mut Buffer,
@@ -43,6 +46,7 @@ pub(crate) fn render_tab_bar(
         content
             .width
             .saturating_sub(NEW_TAB_WIDTH)
+            .saturating_sub(TAB_OVERFLOW_BUTTON_WIDTH)
             .saturating_sub(TAB_SCROLL_BUTTON_WIDTH.saturating_mul(2))
     } else {
         content.width.saturating_sub(new_tab_width)
@@ -84,7 +88,7 @@ pub(crate) fn render_tab_bar(
         x = hits.tab_scroll_left.right();
         content
             .right()
-            .saturating_sub(NEW_TAB_WIDTH + TAB_SCROLL_BUTTON_WIDTH)
+            .saturating_sub(NEW_TAB_WIDTH + TAB_OVERFLOW_BUTTON_WIDTH + TAB_SCROLL_BUTTON_WIDTH)
     } else {
         content.right().saturating_sub(new_tab_width)
     };
@@ -152,12 +156,29 @@ pub(crate) fn render_tab_bar(
                 })
                 .bg(palette.surface0),
         );
-        hits.new_tab = Rect::new(
+        hits.tab_overflow = Rect::new(
             hits.tab_scroll_right.right(),
             area.y,
             content
                 .right()
                 .saturating_sub(hits.tab_scroll_right.right())
+                .min(TAB_OVERFLOW_BUTTON_WIDTH),
+            1,
+        );
+        put_text(
+            buffer,
+            hits.tab_overflow.x,
+            area.y,
+            hits.tab_overflow.width,
+            "[..]",
+            Style::default().fg(palette.overlay1).bg(palette.surface0),
+        );
+        hits.new_tab = Rect::new(
+            hits.tab_overflow.right(),
+            area.y,
+            content
+                .right()
+                .saturating_sub(hits.tab_overflow.right())
                 .min(NEW_TAB_WIDTH),
             1,
         );
