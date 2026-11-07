@@ -53,8 +53,11 @@ fn pane_ids(rows: &[ClientNavigatorRow]) -> Vec<String> {
 }
 
 #[test]
-fn ages_are_shown_in_hours_days_and_weeks() {
-    assert_eq!(format_age(5 * 60), "<1h ago");
+fn ages_are_shown_in_minutes_hours_days_and_weeks() {
+    assert_eq!(format_age(30), "<1m ago");
+    assert_eq!(format_age(60), "1m ago");
+    assert_eq!(format_age(5 * 60), "5m ago");
+    assert_eq!(format_age(59 * 60 + 59), "59m ago");
     assert_eq!(format_age(HOUR), "1h ago");
     assert_eq!(format_age(23 * HOUR + 59 * 60), "23h ago");
     assert_eq!(format_age(DAY), "1d ago");

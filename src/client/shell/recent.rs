@@ -2,7 +2,8 @@ use super::*;
 
 pub(super) const RECENT_LIMIT: usize = 15;
 const RECENT_LOG_CAP: usize = 200;
-const HOUR: u64 = 3600;
+const MINUTE: u64 = 60;
+const HOUR: u64 = 60 * MINUTE;
 const DAY: u64 = 24 * HOUR;
 const WEEK: u64 = 7 * DAY;
 
@@ -33,7 +34,8 @@ pub(super) fn unix_now() -> u64 {
 
 pub(super) fn format_age(secs: u64) -> String {
     match secs {
-        0..HOUR => "<1h ago".to_owned(),
+        0..MINUTE => "<1m ago".to_owned(),
+        MINUTE..HOUR => format!("{}m ago", secs / MINUTE),
         HOUR..DAY => format!("{}h ago", secs / HOUR),
         DAY..WEEK => format!("{}d ago", secs / DAY),
         _ => format!("{}w ago", secs / WEEK),
