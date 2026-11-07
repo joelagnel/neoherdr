@@ -80,7 +80,7 @@ fn recent_lists_accessed_panes_newest_first_with_their_age() {
         .iter()
         .map(|row| row.age.clone().unwrap())
         .collect::<Vec<_>>();
-    assert_eq!(ages, ["2h ago", "1d ago", "3d ago"]);
+    assert_eq!(ages, ["<1m ago", "2h ago", "1d ago"]);
 }
 
 #[test]
@@ -132,7 +132,7 @@ fn recent_view_renders_the_age_column_first() {
         .find(|c| ['●', '○', '◐', '◉'].contains(&c))
         .unwrap_or(usize::MAX);
     assert!(age < dot, "age column comes before the status dot: {row}");
-    assert!(text.contains("2d ago"), "{text}");
+    assert!(text.contains("<1m ago"), "{text}");
 }
 
 #[test]
@@ -296,4 +296,17 @@ fn menu_close_pane_closes_the_focused_pane_from_both_menus() {
             modifiers: KeyModifiers::empty(),
         })]);
     assert!(closed(&outcome));
+}
+
+#[test]
+fn the_pane_you_sit_in_stays_newest_however_long_you_stay() {
+    let mut state = recent_state(2);
+    focus(&mut state, "pane_1", 1_000);
+    focus(&mut state, "pane_2", 1_000 + 3 * HOUR);
+    focus(&mut state, "pane_1", 1_000 + 3 * HOUR + 600);
+    state.open_recent_overlay_at(1_000 + 6 * HOUR);
+    let rows = recent_rows(&state);
+    assert_eq!(pane_ids(&rows), ["pane_1", "pane_2"]);
+    assert_eq!(rows[0].age.as_deref(), Some("<1m ago"));
+    assert_eq!(rows[1].age.as_deref(), Some("2h ago"));
 }

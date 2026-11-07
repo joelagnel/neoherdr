@@ -121,6 +121,15 @@ impl ClientShellState {
         if self.last_focus_access.as_ref() == Some(&key) {
             return false;
         }
+        if let Some((endpoint_id, pane_id)) = self.last_focus_access.as_ref() {
+            if let Some(entry) = self
+                .recent_access
+                .iter_mut()
+                .find(|entry| &entry.endpoint_id == endpoint_id && &entry.pane_id == pane_id)
+            {
+                entry.at = now;
+            }
+        }
         self.recent_access
             .retain(|entry| (&entry.endpoint_id, &entry.pane_id) != (&key.0, &key.1));
         self.recent_access.insert(
@@ -146,7 +155,11 @@ impl ClientShellState {
     }
 
     pub(super) fn open_recent_overlay_at(&mut self, now: u64) {
-        let entries = self
+        let focused = self
+            .snapshot
+            .as_deref()
+            .and_then(|snapshot| snapshot.focused_pane_id.clone());
+        let mut entries: Vec<ClientRecentEntry> = self
             .recent_access
             .iter()
             .filter(|entry| {
@@ -161,9 +174,17 @@ impl ClientShellState {
             .map(|entry| ClientRecentEntry {
                 endpoint_id: entry.endpoint_id.clone(),
                 pane_id: entry.pane_id.clone(),
-                age_secs: now.saturating_sub(entry.at),
+                // The pane being looked at is being accessed right now.
+                age_secs: if entry.endpoint_id == self.active_endpoint_id
+                    && focused.as_deref() == Some(entry.pane_id.as_str())
+                {
+                    0
+                } else {
+                    now.saturating_sub(entry.at)
+                },
             })
             .collect();
+        entries.sort_by_key(|entry| entry.age_secs);
         self.open_navigator_overlay_scoped(None, Some(entries));
         // Start on the previous pane: the newest row is the one already focused.
         if let Some(ClientShellOverlay::Navigator(navigator)) = self.overlay.as_ref() {
