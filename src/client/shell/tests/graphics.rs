@@ -275,6 +275,7 @@ fn every_dialog_and_menu_occludes_its_panel_not_the_whole_screen() {
             scroll: 0,
             filter: None,
             workspace_scope: None,
+            recent: None,
         }),
         ClientShellOverlay::WorktreeCreate(ClientWorktreeCreateOverlay {
             source_workspace_id: "ws_1".into(),

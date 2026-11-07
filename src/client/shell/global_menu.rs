@@ -4,6 +4,12 @@ use super::*;
 pub(super) enum ClientGlobalMenuAction {
     Binding(crate::input::KeybindAction),
     WhatsNew,
+    Switch,
+    Find,
+    Tabs,
+    Recent,
+    GotoDone,
+    NextWorking,
 }
 
 pub(super) fn global_menu_attention(snapshot: &ClientShellSnapshot) -> bool {
@@ -19,10 +25,25 @@ pub(super) fn global_menu_item_has_badge(
             && snapshot.integration_updates_available)
 }
 
+/// The menu entries; `with_navigation` adds the header menu's navigation buttons in front, which
+/// the desktop Menu button offers too.
 pub(super) fn global_menu_items(
     snapshot: &ClientShellSnapshot,
+    with_navigation: bool,
 ) -> Vec<(&'static str, ClientGlobalMenuAction)> {
-    let mut items = vec![
+    let mut items = if with_navigation {
+        vec![
+            ("switch", ClientGlobalMenuAction::Switch),
+            ("Find", ClientGlobalMenuAction::Find),
+            ("tabs", ClientGlobalMenuAction::Tabs),
+            ("Recent", ClientGlobalMenuAction::Recent),
+            ("Goto done", ClientGlobalMenuAction::GotoDone),
+            ("Next working", ClientGlobalMenuAction::NextWorking),
+        ]
+    } else {
+        Vec::new()
+    };
+    items.extend([
         (
             "settings",
             ClientGlobalMenuAction::Binding(crate::input::KeybindAction::Settings),
@@ -35,7 +56,7 @@ pub(super) fn global_menu_items(
             "reload config",
             ClientGlobalMenuAction::Binding(crate::input::KeybindAction::ReloadConfig),
         ),
-    ];
+    ]);
     if snapshot.update_available.is_some() || snapshot.latest_release_notes_available {
         items.push((
             if snapshot.update_available.is_some() {
@@ -68,7 +89,7 @@ impl ClientShellState {
         let item_count = self
             .snapshot
             .as_deref()
-            .map(global_menu_items)
+            .map(|snapshot| global_menu_items(snapshot, true))
             .map_or(0, |items| items.len());
         let Some(ClientShellOverlay::GlobalMenu(menu)) = self.overlay.as_mut() else {
             return;
@@ -83,12 +104,20 @@ impl ClientShellState {
         outcome: &mut ClientShellInput,
     ) {
         let Some(action) = self.snapshot.as_deref().and_then(|snapshot| {
-            global_menu_items(snapshot)
+            global_menu_items(snapshot, true)
                 .get(index)
                 .map(|(_, action)| *action)
         }) else {
             return;
         };
+        self.activate_global_menu_action(action, outcome);
+    }
+
+    pub(super) fn activate_global_menu_action(
+        &mut self,
+        action: ClientGlobalMenuAction,
+        outcome: &mut ClientShellInput,
+    ) {
         if action == ClientGlobalMenuAction::WhatsNew
             && self
                 .snapshot
@@ -104,6 +133,12 @@ impl ClientShellState {
                 self.record_binding(crate::input::KeybindMatch::Action(binding), outcome)
             }
             ClientGlobalMenuAction::WhatsNew => self.open_release_notes(),
+            ClientGlobalMenuAction::Switch => self.open_mobile_switcher(),
+            ClientGlobalMenuAction::Find => self.open_search_overlay(),
+            ClientGlobalMenuAction::Tabs => self.open_tabs_overlay(),
+            ClientGlobalMenuAction::Recent => self.open_recent_overlay(),
+            ClientGlobalMenuAction::GotoDone => self.goto_next_done(outcome),
+            ClientGlobalMenuAction::NextWorking => self.goto_next_working(outcome),
         }
         outcome.repaint = true;
     }

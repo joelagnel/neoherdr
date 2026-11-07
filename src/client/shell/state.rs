@@ -126,6 +126,7 @@ pub(super) struct ShellHitMap {
     pub(super) mobile_switch: Rect,
     pub(super) mobile_goto_done: Rect,
     pub(super) mobile_tabs: Rect,
+    pub(super) mobile_recent: Rect,
     pub(super) mobile_next_working: Rect,
     pub(super) mobile_find: Rect,
     pub(super) mobile_close: Rect,
@@ -377,6 +378,8 @@ pub(super) struct ClientNavigatorRow {
     pub(super) status: Option<crate::api::schema::AgentStatus>,
     pub(super) stale: bool,
     pub(super) current: bool,
+    /// How long ago the Recent view's row was last accessed.
+    pub(super) age: Option<String>,
     pub(super) target: ClientNavigatorTarget,
 }
 
@@ -389,6 +392,8 @@ pub(super) struct ClientNavigatorOverlay {
     pub(super) filter: Option<ClientNavigatorFilter>,
     /// Lists only the tabs of this space (on the active machine), without headers.
     pub(super) workspace_scope: Option<String>,
+    /// The Recent view: panes by last access, newest first.
+    pub(super) recent: Option<Vec<super::recent::ClientRecentEntry>>,
 }
 
 #[derive(Debug)]
@@ -918,6 +923,8 @@ pub(crate) struct ClientShellState {
     pub(super) reveal_mobile_workspace: bool,
     pub(super) mobile_switcher_suspended: bool,
     pub(super) mobile_menu_open: bool,
+    pub(super) recent_access: Vec<super::recent::ClientRecentAccess>,
+    pub(super) last_focus_access: Option<(ClientEndpointId, String)>,
     pub(super) reveal_focused_tab: bool,
     pub(super) last_tab_bar_width: Option<u16>,
     pub(super) last_composed_size: Option<(u16, u16)>,
@@ -1093,6 +1100,8 @@ impl ClientShellState {
             reveal_mobile_workspace: false,
             mobile_switcher_suspended: false,
             mobile_menu_open: false,
+            recent_access: super::recent::restore_recent_access(&preferences.recent),
+            last_focus_access: None,
             reveal_focused_tab: true,
             last_tab_bar_width: None,
             last_composed_size: None,

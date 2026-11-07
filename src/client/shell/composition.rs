@@ -153,6 +153,9 @@ impl ClientShellState {
         rows: u16,
     ) -> Option<crate::client::frame_output::ComposedFrame> {
         self.last_composed_at = Some(std::time::Instant::now());
+        if self.note_focus_access(super::recent::unix_now()) {
+            self.persist_chrome_preferences(&mut ClientShellInput::default());
+        }
         self.selection_repaint_deadline = None;
         if self.last_composed_size != Some((cols, rows)) && self.mode == ClientShellMode::Navigate {
             self.reveal_navigation_workspace = true;

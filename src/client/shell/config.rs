@@ -61,6 +61,7 @@ impl ClientShellState {
                 .then_some(self.config.agent_panel_sort),
             collapsed_groups,
             remote_collapsed_groups,
+            recent: super::recent::recent_preferences(&self.recent_access),
         };
         if let Err(error) = preferences::store(path, preferences) {
             self.set_endpoint_error(error);

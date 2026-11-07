@@ -445,6 +445,7 @@ pub(super) fn navigator_rows(
                                 stale,
                                 current: endpoint.endpoint_id == *active_endpoint_id
                                     && snapshot.focused_pane_id.as_deref() == Some(&pane.pane_id),
+                                age: None,
                                 target: ClientNavigatorTarget::Pane {
                                     endpoint_id: endpoint.endpoint_id.clone(),
                                     pane_id: pane.pane_id.clone(),
@@ -468,6 +469,7 @@ pub(super) fn navigator_rows(
                         status: None,
                         stale,
                         current: false,
+                        age: None,
                         target: ClientNavigatorTarget::Workspace {
                             endpoint_id: endpoint.endpoint_id.clone(),
                             workspace_id: workspace.workspace_id.clone(),
@@ -488,6 +490,7 @@ pub(super) fn navigator_rows(
                     status: None,
                     stale,
                     current: false,
+                    age: None,
                     target: ClientNavigatorTarget::Machine {
                         endpoint_id: endpoint.endpoint_id.clone(),
                     },
@@ -496,7 +499,10 @@ pub(super) fn navigator_rows(
             rows.extend(endpoint_rows);
         }
     }
-    rows
+    match navigator.recent.as_deref() {
+        Some(entries) => super::recent::recent_rows(rows, entries),
+        None => rows,
+    }
 }
 
 pub(super) fn navigator_selected_index(

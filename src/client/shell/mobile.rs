@@ -23,14 +23,16 @@ enum MobileMenuAction {
     Find,
     Switch,
     Tabs,
+    Recent,
     GotoDone,
     NextWorking,
 }
 
-const MOBILE_MENU_ACTIONS: [(&str, MobileMenuAction); 5] = [
+const MOBILE_MENU_ACTIONS: [(&str, MobileMenuAction); 6] = [
     ("switch", MobileMenuAction::Switch),
     ("Find", MobileMenuAction::Find),
     ("tabs", MobileMenuAction::Tabs),
+    ("Recent", MobileMenuAction::Recent),
     ("Goto done", MobileMenuAction::GotoDone),
     ("Next working", MobileMenuAction::NextWorking),
 ];
@@ -223,6 +225,7 @@ pub(super) fn render_mobile_menu(
             MobileMenuAction::Find => hits.mobile_find = hit,
             MobileMenuAction::Switch => hits.mobile_switch = hit,
             MobileMenuAction::Tabs => hits.mobile_tabs = hit,
+            MobileMenuAction::Recent => hits.mobile_recent = hit,
             MobileMenuAction::GotoDone => hits.mobile_goto_done = hit,
             MobileMenuAction::NextWorking => hits.mobile_next_working = hit,
         }
@@ -1230,7 +1233,7 @@ fn mobile_items(
     }
 
     items.push(MobileItem::section("menu", palette));
-    for (index, (label, _)) in super::global_menu::global_menu_items(snapshot)
+    for (index, (label, _)) in super::global_menu::global_menu_items(snapshot, false)
         .into_iter()
         .enumerate()
     {
@@ -1260,7 +1263,7 @@ pub(in crate::client::shell) fn next_flagged_index(
 impl ClientShellState {
     /// Focuses the next agent whose finished work was not seen yet, in the agent list order,
     /// starting after the focused one.
-    fn goto_next_done(&mut self, outcome: &mut ClientShellInput) {
+    pub(super) fn goto_next_done(&mut self, outcome: &mut ClientShellInput) {
         let rows = super::aggregate_navigation::aggregate_agent_rows(
             &self.endpoints,
             &self.active_endpoint_id,
@@ -1296,7 +1299,7 @@ impl ClientShellState {
 
     /// Focuses the next tab with a working agent, across all spaces in their list order,
     /// starting after the current tab and wrapping around.
-    fn goto_next_working(&mut self, outcome: &mut ClientShellInput) {
+    pub(super) fn goto_next_working(&mut self, outcome: &mut ClientShellInput) {
         let target = self.snapshot.as_deref().and_then(|snapshot| {
             let tabs = snapshot
                 .workspaces
@@ -1336,7 +1339,7 @@ impl ClientShellState {
         }
     }
 
-    fn open_mobile_switcher(&mut self) {
+    pub(super) fn open_mobile_switcher(&mut self) {
         self.mobile_switcher_scroll = 0;
         self.reveal_mobile_workspace = false;
         self.pending_workspace_highlight = None;
@@ -1377,6 +1380,8 @@ impl ClientShellState {
                     self.open_search_overlay();
                 } else if super::contains(self.hits.mobile_tabs, point) {
                     self.open_tabs_overlay();
+                } else if super::contains(self.hits.mobile_recent, point) {
+                    self.open_recent_overlay();
                 } else if super::contains(self.hits.mobile_goto_done, point) {
                     self.goto_next_done(outcome);
                 } else if super::contains(self.hits.mobile_next_working, point) {
@@ -1500,17 +1505,18 @@ impl ClientShellState {
                 );
             }
             Some(ClientMobileTarget::Menu(index)) => {
-                let actionable = self.snapshot.as_deref().is_some_and(|snapshot| {
-                    super::global_menu::global_menu_items(snapshot)
+                let action = self.snapshot.as_deref().and_then(|snapshot| {
+                    super::global_menu::global_menu_items(snapshot, false)
                         .get(index)
-                        .is_some_and(|(_, action)| {
+                        .map(|(_, action)| *action)
+                        .filter(|action| {
                             *action != super::global_menu::ClientGlobalMenuAction::WhatsNew
                                 || snapshot.release_notes.is_some()
                         })
                 });
-                if actionable {
+                if let Some(action) = action {
                     self.mobile_switcher_suspended = true;
-                    self.activate_global_menu_item(index, outcome);
+                    self.activate_global_menu_action(action, outcome);
                 }
             }
             None => {}

@@ -90,7 +90,7 @@ pub(crate) fn render_global_menu(
     snapshot: &ClientShellSnapshot,
     palette: &Palette,
 ) -> Option<OverlayRender> {
-    let items = super::super::global_menu::global_menu_items(snapshot);
+    let items = super::super::global_menu::global_menu_items(snapshot, true);
     let screen = buffer.area;
     let width = items
         .iter()
@@ -727,7 +727,9 @@ fn render_navigator_overlay(
         q.x + 2,
         q.y,
         q.width.saturating_sub(4),
-        if n.workspace_scope.is_some() {
+        if n.recent.is_some() {
+            " Recent "
+        } else if n.workspace_scope.is_some() {
             " Tabs "
         } else {
             " Go to "
@@ -748,7 +750,9 @@ fn render_navigator_overlay(
             }
         )
     } else if n.query.is_empty() {
-        if n.workspace_scope.is_some() {
+        if n.recent.is_some() {
+            " / search recent".to_owned()
+        } else if n.workspace_scope.is_some() {
             " / search tabs".to_owned()
         } else {
             " / search agents and terminals".to_owned()
@@ -762,7 +766,10 @@ fn render_navigator_overlay(
         .count();
     let count = format!(
         "{terminal_count} {}",
-        match (n.workspace_scope.is_some(), terminal_count == 1) {
+        match (
+            n.workspace_scope.is_some() || n.recent.is_some(),
+            terminal_count == 1,
+        ) {
             (true, true) => "tab",
             (true, false) => "tabs",
             (false, true) => "terminal",
@@ -832,7 +839,11 @@ fn render_navigator_overlay(
             body.x,
             body.y,
             body.width,
-            " No matching agents or terminals",
+            if n.recent.is_some() {
+                " Nothing accessed yet"
+            } else {
+                " No matching agents or terminals"
+            },
             Style::default().fg(p.overlay0).bg(p.panel_bg),
         );
     }
@@ -870,7 +881,7 @@ fn render_navigator_overlay(
                 .bg(p.panel_bg)
         };
         let is_pane = matches!(r.target, ClientNavigatorTarget::Pane { .. });
-        let connector = if !is_pane {
+        let connector = if !is_pane || r.age.is_some() {
             ""
         } else if rows
             .get(ix + 1)
@@ -882,7 +893,10 @@ fn render_navigator_overlay(
         };
         let padding = u16::from(r.depth.saturating_sub(u8::from(is_pane))) * 2 + 1;
         let connector_x = rect.x + padding;
-        let indent = format!("{:width$}{connector}", "", width = usize::from(padding));
+        let indent = match r.age.as_deref() {
+            Some(age) => format!(" {age:<8}"),
+            None => format!("{:width$}{connector}", "", width = usize::from(padding)),
+        };
         let current = if r.current { "◆ " } else { "" };
         let status = r.status.map(status_dot).unwrap_or_default();
         let status_separator = if status.is_empty() { "" } else { " " };

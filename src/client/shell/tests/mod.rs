@@ -265,6 +265,7 @@ mod link_unwrap;
 mod mobile;
 mod mouse_selection;
 mod popup_focus_projection;
+mod recent;
 mod sidebar_buttons;
 mod startup_overlays;
 mod status_order;

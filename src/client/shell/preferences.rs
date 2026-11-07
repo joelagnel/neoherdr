@@ -14,6 +14,13 @@ pub(super) struct ClientRemoteCollapsedGroups {
     pub(super) collapsed_groups: Vec<String>,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub(super) struct ClientRecentPreference {
+    pub(super) endpoint: String,
+    pub(super) pane_id: String,
+    pub(super) at: u64,
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub(super) struct ClientChromePreferences {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -28,6 +35,8 @@ pub(super) struct ClientChromePreferences {
     pub(super) collapsed_groups: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(super) remote_collapsed_groups: Vec<ClientRemoteCollapsedGroups>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) recent: Vec<ClientRecentPreference>,
 }
 
 pub(super) fn path_for_local_endpoint(socket_path: &Path) -> PathBuf {

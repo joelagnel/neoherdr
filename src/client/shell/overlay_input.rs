@@ -191,7 +191,7 @@ impl ClientShellState {
     }
 
     pub(super) fn open_navigator_overlay(&mut self) {
-        self.open_navigator_overlay_scoped(None);
+        self.open_navigator_overlay_scoped(None, None);
     }
 
     /// A Find-style list of just the tabs in the focused space, for quick tab switching.
@@ -200,10 +200,14 @@ impl ClientShellState {
             .snapshot
             .as_deref()
             .and_then(|snapshot| snapshot.focused_workspace_id.clone());
-        self.open_navigator_overlay_scoped(workspace_scope);
+        self.open_navigator_overlay_scoped(workspace_scope, None);
     }
 
-    fn open_navigator_overlay_scoped(&mut self, workspace_scope: Option<String>) {
+    pub(super) fn open_navigator_overlay_scoped(
+        &mut self,
+        workspace_scope: Option<String>,
+        recent: Option<Vec<super::recent::ClientRecentEntry>>,
+    ) {
         let mut navigator = ClientNavigatorOverlay {
             query: TextEditor::default(),
             search_focused: false,
@@ -211,6 +215,7 @@ impl ClientShellState {
             scroll: 0,
             filter: None,
             workspace_scope,
+            recent,
         };
         let rows =
             render::client_navigator_rows(&self.endpoints, &self.active_endpoint_id, &navigator);
