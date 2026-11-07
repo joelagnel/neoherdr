@@ -1183,6 +1183,7 @@ fn mobile_menu_opens_a_wide_right_aligned_drop_down_of_stacked_buttons() {
         state.hits.mobile_recent,
         state.hits.mobile_goto_done,
         state.hits.mobile_next_working,
+        state.hits.mobile_close_pane,
     ];
     for button in buttons {
         assert!(!button.is_empty());
@@ -1201,8 +1202,8 @@ fn mobile_menu_opens_a_wide_right_aligned_drop_down_of_stacked_buttons() {
         panel.width >= menu.width + 6,
         "much wider than the menu button: {panel:?} vs {menu:?}"
     );
-    assert_eq!(panel.height, 13, "six buttons plus a blank last row");
-    let last = buttons[5];
+    assert_eq!(panel.height, 15, "seven buttons plus a blank last row");
+    let last = buttons[6];
     assert_eq!(
         last.bottom(),
         panel.bottom(),

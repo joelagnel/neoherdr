@@ -1,7 +1,7 @@
 use super::*;
 
 // The header menu's navigation buttons come first in the desktop dropdown.
-const NAV_ITEMS: usize = 6;
+const NAV_ITEMS: usize = 7;
 
 #[test]
 fn endpoint_product_announcement_is_client_rendered_modal_and_dismissed_by_identity() {
@@ -924,7 +924,7 @@ fn coalesced_release_notes_open_and_scroll_uses_current_geometry() {
     state.set_pane_surface(surface());
     state.compose(106, 30).expect("initial shell");
     state.overlay = Some(ClientShellOverlay::GlobalMenu(ClientGlobalMenuOverlay {
-        highlighted: 9,
+        highlighted: 10,
     }));
 
     state.handle_raw_events(vec![
@@ -995,7 +995,7 @@ fn coalesced_release_notes_open_and_mouse_uses_current_geometry() {
     ));
 
     state.overlay = Some(ClientShellOverlay::GlobalMenu(ClientGlobalMenuOverlay {
-        highlighted: 9,
+        highlighted: 10,
     }));
     state.handle_raw_events(vec![
         RawInputEvent::Key(crate::input::TerminalKey::new(
@@ -1017,7 +1017,7 @@ fn coalesced_release_notes_open_and_mouse_uses_current_geometry() {
     ));
 
     state.overlay = Some(ClientShellOverlay::GlobalMenu(ClientGlobalMenuOverlay {
-        highlighted: 9,
+        highlighted: 10,
     }));
     let closed = state.handle_raw_events(vec![
         RawInputEvent::Key(crate::input::TerminalKey::new(
@@ -1160,7 +1160,7 @@ fn client_settings_preview_restore_and_endpoint_integrations_are_owned_by_overla
     state.set_snapshot(Box::new(snapshot()));
     state.set_pane_surface(surface());
     state.overlay = Some(ClientShellOverlay::GlobalMenu(ClientGlobalMenuOverlay {
-        highlighted: 6,
+        highlighted: 7,
     }));
     let open = state.handle_input_bytes(b"\r");
     assert!(open.actions.is_empty());

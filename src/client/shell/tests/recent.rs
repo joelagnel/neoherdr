@@ -185,6 +185,11 @@ fn desktop_menu_dropdown_offers_every_mobile_menu_item_and_recent_follows_tabs()
     let labels = items.iter().map(|(label, _)| *label).collect::<Vec<_>>();
     let tabs = labels.iter().position(|label| *label == "tabs").unwrap();
     assert_eq!(labels[tabs + 1], "Recent");
+    let working = labels
+        .iter()
+        .position(|label| *label == "Next working")
+        .unwrap();
+    assert_eq!(labels[working + 1], "Close pane");
     for label in [
         "switch",
         "Find",
@@ -258,4 +263,37 @@ fn recent_starts_on_the_previous_pane_not_the_focused_one() {
         }
         _ => panic!("recent overlay"),
     }
+}
+
+#[test]
+fn menu_close_pane_closes_the_focused_pane_from_both_menus() {
+    use crate::api::schema::Method;
+    let closed = |outcome: &ClientShellInput| {
+        outcome.actions.iter().any(|action| {
+            matches!(action, ClientShellAction::Endpoint { request, .. }
+                if matches!(&request.method, Method::PaneClose(target) if target.pane_id == "pane_1"))
+        })
+    };
+    let mut state = recent_state(2);
+    let mut outcome = ClientShellInput::default();
+    state.activate_global_menu_action(
+        ClientGlobalMenuAction::Binding(crate::input::KeybindAction::ClosePane),
+        &mut outcome,
+    );
+    assert!(closed(&outcome));
+
+    let mut mobile = recent_state(2);
+    mobile.compose(44, 40).unwrap();
+    mobile.mobile_menu_open = true;
+    mobile.compose(44, 40).unwrap();
+    let button = mobile.hits.mobile_close_pane;
+    assert_eq!(button.y, mobile.hits.mobile_next_working.bottom());
+    let outcome =
+        mobile.handle_raw_events(vec![crate::raw_input::RawInputEvent::Mouse(MouseEvent {
+            kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            column: button.x + 1,
+            row: button.y,
+            modifiers: KeyModifiers::empty(),
+        })]);
+    assert!(closed(&outcome));
 }

@@ -26,15 +26,17 @@ enum MobileMenuAction {
     Recent,
     GotoDone,
     NextWorking,
+    ClosePane,
 }
 
-const MOBILE_MENU_ACTIONS: [(&str, MobileMenuAction); 6] = [
+const MOBILE_MENU_ACTIONS: [(&str, MobileMenuAction); 7] = [
     ("switch", MobileMenuAction::Switch),
     ("Find", MobileMenuAction::Find),
     ("tabs", MobileMenuAction::Tabs),
     ("Recent", MobileMenuAction::Recent),
     ("Goto done", MobileMenuAction::GotoDone),
     ("Next working", MobileMenuAction::NextWorking),
+    ("Close pane", MobileMenuAction::ClosePane),
 ];
 
 struct MobileItem {
@@ -228,6 +230,7 @@ pub(super) fn render_mobile_menu(
             MobileMenuAction::Recent => hits.mobile_recent = hit,
             MobileMenuAction::GotoDone => hits.mobile_goto_done = hit,
             MobileMenuAction::NextWorking => hits.mobile_next_working = hit,
+            MobileMenuAction::ClosePane => hits.mobile_close_pane = hit,
         }
     }
 }
@@ -1386,6 +1389,11 @@ impl ClientShellState {
                     self.goto_next_done(outcome);
                 } else if super::contains(self.hits.mobile_next_working, point) {
                     self.goto_next_working(outcome);
+                } else if super::contains(self.hits.mobile_close_pane, point) {
+                    self.record_binding(
+                        crate::input::KeybindMatch::Action(crate::input::KeybindAction::ClosePane),
+                        outcome,
+                    );
                 }
                 return true;
             }

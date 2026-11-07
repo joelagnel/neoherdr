@@ -39,6 +39,10 @@ pub(super) fn global_menu_items(
             ("Recent", ClientGlobalMenuAction::Recent),
             ("Goto done", ClientGlobalMenuAction::GotoDone),
             ("Next working", ClientGlobalMenuAction::NextWorking),
+            (
+                "Close pane",
+                ClientGlobalMenuAction::Binding(crate::input::KeybindAction::ClosePane),
+            ),
         ]
     } else {
         Vec::new()
