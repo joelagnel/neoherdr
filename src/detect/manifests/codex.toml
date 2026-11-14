@@ -1,5 +1,5 @@
 id = "codex"
-version = "2026.10.30.2"
+version = "2026.11.14.1"
 min_engine_version = 3
 updated_at = "2026-10-30T00:00:00Z"
 
@@ -41,6 +41,7 @@ not = [
   { contains = [" to interrupt)"] },
   { regex = ['\((?:[0-9]+[hm] )*[0-9]+s(?: • [^\r\n)]*)?\)'] },
   { regex = ['background terminals? running'] },
+  { line_regex = ['^\s*[•◦]\s+Waiting for background terminal\b'] },
 ]
 
 [[rules]]
@@ -133,6 +134,17 @@ any = [
   { contains = ["do you want to"], any = [{ contains = ["yes"] }, { contains = ["❯"] }] },
   { contains = ["would you like to"], any = [{ contains = ["yes"] }, { contains = ["❯"] }] },
 ]
+
+[[rules]]
+id = "waiting_for_background_terminal_working"
+state = "working"
+priority = 560
+region = "bottom_non_empty_lines(8)"
+visible_working = true
+# While Codex polls a background terminal its status header reads "Waiting for background
+# terminal", sometimes without the elapsed-timer suffix the generic fallback needs. Anchored at the
+# line start so text typed at the "›" prompt cannot fake it; permission prompts rank above this rule.
+line_regex = ['^\s*[•◦]\s+Waiting for background terminal\b']
 
 [[rules]]
 id = "background_terminal_working"

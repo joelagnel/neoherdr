@@ -1168,6 +1168,27 @@ fn codex_idle_prompt_with_background_terminals_is_working() {
 }
 
 #[test]
+fn codex_waiting_for_background_terminal_status_is_working() {
+    with_manifest_dirs("codex-waiting-background", || {
+        for status in [
+            "• Waiting for background terminal",
+            "◦ Waiting for background terminal · sleep 300",
+            "• Waiting for background terminal (12s • esc to interrupt)",
+        ] {
+            for title in [
+                "Verify warmup commits | repo",
+                "⠙ Verify warmup commits | repo",
+            ] {
+                let screen =
+                    format!("  Worked for 10s • 8:12 AM\n\n{status}\n\n› \n  gpt-5 · ~/repo\n");
+                let result = codex_title_case(&screen, title);
+                assert_eq!(result.state, AgentState::Working, "status: {status}");
+            }
+        }
+    });
+}
+
+#[test]
 fn codex_prompt_without_background_terminals_stays_idle() {
     with_manifest_dirs("codex-no-background", || {
         for footer in [
