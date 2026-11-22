@@ -1182,6 +1182,7 @@ fn mobile_menu_opens_a_wide_right_aligned_drop_down_of_stacked_buttons() {
         state.hits.mobile_tabs,
         state.hits.mobile_recent,
         state.hits.mobile_goto_done,
+        state.hits.mobile_goto_blocked,
         state.hits.mobile_next_working,
         state.hits.mobile_close_pane,
     ];
@@ -1202,8 +1203,8 @@ fn mobile_menu_opens_a_wide_right_aligned_drop_down_of_stacked_buttons() {
         panel.width >= menu.width + 6,
         "much wider than the menu button: {panel:?} vs {menu:?}"
     );
-    assert_eq!(panel.height, 15, "seven buttons plus a blank last row");
-    let last = buttons[6];
+    assert_eq!(panel.height, 17, "eight buttons plus a blank last row");
+    let last = buttons[7];
     assert_eq!(
         last.bottom(),
         panel.bottom(),
@@ -1215,7 +1216,15 @@ fn mobile_menu_opens_a_wide_right_aligned_drop_down_of_stacked_buttons() {
         .map(|row| mobile_row_text(&frame, row))
         .collect::<Vec<_>>();
     let text = rows.concat();
-    let positions = ["switch", "Find", "tabs", "Goto done", "Next working"].map(|label| {
+    let positions = [
+        "switch",
+        "Find",
+        "tabs",
+        "Goto done",
+        "Goto blocked",
+        "Next working",
+    ]
+    .map(|label| {
         text.find(label)
             .unwrap_or_else(|| panic!("{label} in {text:?}"))
     });
@@ -1426,6 +1435,39 @@ fn mobile_goto_done_does_nothing_without_a_done_agent() {
     let mut state = done_state(&[]);
     let (pane, _) = goto_done_pane(&mut state);
     assert_eq!(pane, None);
+}
+
+#[test]
+fn mobile_goto_blocked_walks_the_blocked_agents_and_wraps_around() {
+    let mut state = state_with(
+        vec![
+            workspace("a", "alpha", AgentStatus::Idle, None),
+            workspace("b", "bravo", AgentStatus::Idle, None),
+            workspace("c", "charlie", AgentStatus::Idle, None),
+        ],
+        vec![
+            agent_for("pane-a", "a", AgentStatus::Idle, 1),
+            agent_for("pane-b", "b", AgentStatus::Blocked, 2),
+            agent_for("pane-c", "c", AgentStatus::Blocked, 3),
+        ],
+    );
+    let goto_blocked = |state: &mut ClientShellState| {
+        open_mobile_menu(state, 60, 24);
+        let outcome = state.handle_raw_events(vec![mobile_click(state.hits.mobile_goto_blocked)]);
+        assert!(!state.mobile_menu_open, "the menu closes");
+        outcome.actions.iter().find_map(|action| match action {
+            ClientShellAction::Endpoint { request, .. } => match &request.method {
+                crate::api::schema::Method::PaneFocus(target) => Some(target.pane_id.clone()),
+                _ => None,
+            },
+            _ => None,
+        })
+    };
+    assert_eq!(goto_blocked(&mut state).as_deref(), Some("pane-b"));
+    focus_pane(&mut state, "pane-b");
+    assert_eq!(goto_blocked(&mut state).as_deref(), Some("pane-c"));
+    focus_pane(&mut state, "pane-c");
+    assert_eq!(goto_blocked(&mut state).as_deref(), Some("pane-b"), "wraps");
 }
 
 #[test]

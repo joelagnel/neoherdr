@@ -194,6 +194,7 @@ fn desktop_menu_dropdown_offers_every_mobile_menu_item_and_recent_follows_tabs()
         "switch",
         "Find",
         "Goto done",
+        "Goto blocked",
         "Next working",
         "settings",
         "detach",

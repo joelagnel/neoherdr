@@ -25,16 +25,18 @@ enum MobileMenuAction {
     Tabs,
     Recent,
     GotoDone,
+    GotoBlocked,
     NextWorking,
     ClosePane,
 }
 
-const MOBILE_MENU_ACTIONS: [(&str, MobileMenuAction); 7] = [
+const MOBILE_MENU_ACTIONS: [(&str, MobileMenuAction); 8] = [
     ("switch", MobileMenuAction::Switch),
     ("Find", MobileMenuAction::Find),
     ("tabs", MobileMenuAction::Tabs),
     ("Recent", MobileMenuAction::Recent),
     ("Goto done", MobileMenuAction::GotoDone),
+    ("Goto blocked", MobileMenuAction::GotoBlocked),
     ("Next working", MobileMenuAction::NextWorking),
     ("Close pane", MobileMenuAction::ClosePane),
 ];
@@ -229,6 +231,7 @@ pub(super) fn render_mobile_menu(
             MobileMenuAction::Tabs => hits.mobile_tabs = hit,
             MobileMenuAction::Recent => hits.mobile_recent = hit,
             MobileMenuAction::GotoDone => hits.mobile_goto_done = hit,
+            MobileMenuAction::GotoBlocked => hits.mobile_goto_blocked = hit,
             MobileMenuAction::NextWorking => hits.mobile_next_working = hit,
             MobileMenuAction::ClosePane => hits.mobile_close_pane = hit,
         }
@@ -1267,6 +1270,20 @@ impl ClientShellState {
     /// Focuses the next agent whose finished work was not seen yet, in the agent list order,
     /// starting after the focused one.
     pub(super) fn goto_next_done(&mut self, outcome: &mut ClientShellInput) {
+        self.goto_next_agent_with_status(crate::api::schema::AgentStatus::Done, outcome);
+    }
+
+    /// Focuses the next agent that is blocked waiting for input, in the agent list order,
+    /// starting after the focused one.
+    pub(super) fn goto_next_blocked(&mut self, outcome: &mut ClientShellInput) {
+        self.goto_next_agent_with_status(crate::api::schema::AgentStatus::Blocked, outcome);
+    }
+
+    fn goto_next_agent_with_status(
+        &mut self,
+        status: crate::api::schema::AgentStatus,
+        outcome: &mut ClientShellInput,
+    ) {
         let rows = super::aggregate_navigation::aggregate_agent_rows(
             &self.endpoints,
             &self.active_endpoint_id,
@@ -1278,7 +1295,7 @@ impl ClientShellState {
             (
                 row.endpoint.endpoint_id.clone(),
                 row.agent.pane_id.clone(),
-                row.agent.agent_status == crate::api::schema::AgentStatus::Done,
+                row.agent.agent_status == status,
             )
         })
         .collect::<Vec<_>>();
@@ -1387,6 +1404,8 @@ impl ClientShellState {
                     self.open_recent_overlay();
                 } else if super::contains(self.hits.mobile_goto_done, point) {
                     self.goto_next_done(outcome);
+                } else if super::contains(self.hits.mobile_goto_blocked, point) {
+                    self.goto_next_blocked(outcome);
                 } else if super::contains(self.hits.mobile_next_working, point) {
                     self.goto_next_working(outcome);
                 } else if super::contains(self.hits.mobile_close_pane, point) {

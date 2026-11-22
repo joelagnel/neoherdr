@@ -127,6 +127,7 @@ pub(super) struct ShellHitMap {
     pub(super) mobile_menu_panel: Rect,
     pub(super) mobile_switch: Rect,
     pub(super) mobile_goto_done: Rect,
+    pub(super) mobile_goto_blocked: Rect,
     pub(super) mobile_tabs: Rect,
     pub(super) mobile_recent: Rect,
     pub(super) mobile_close_pane: Rect,

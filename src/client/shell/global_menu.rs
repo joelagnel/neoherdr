@@ -9,6 +9,7 @@ pub(super) enum ClientGlobalMenuAction {
     Tabs,
     Recent,
     GotoDone,
+    GotoBlocked,
     NextWorking,
 }
 
@@ -38,6 +39,7 @@ pub(super) fn global_menu_items(
             ("tabs", ClientGlobalMenuAction::Tabs),
             ("Recent", ClientGlobalMenuAction::Recent),
             ("Goto done", ClientGlobalMenuAction::GotoDone),
+            ("Goto blocked", ClientGlobalMenuAction::GotoBlocked),
             ("Next working", ClientGlobalMenuAction::NextWorking),
             (
                 "Close pane",
@@ -142,6 +144,7 @@ impl ClientShellState {
             ClientGlobalMenuAction::Tabs => self.open_tabs_overlay(),
             ClientGlobalMenuAction::Recent => self.open_recent_overlay(),
             ClientGlobalMenuAction::GotoDone => self.goto_next_done(outcome),
+            ClientGlobalMenuAction::GotoBlocked => self.goto_next_blocked(outcome),
             ClientGlobalMenuAction::NextWorking => self.goto_next_working(outcome),
         }
         outcome.repaint = true;
