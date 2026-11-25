@@ -1358,3 +1358,39 @@ fn codex_capacity_error_does_not_hide_a_live_turn_or_old_errors() {
         );
     });
 }
+
+#[test]
+fn openclaw_status_line_classifies_idle_and_busy() {
+    with_manifest_dirs("openclaw-status", || {
+        let screen = |status: &str| {
+            format!("assistant: done\n\n {status}\n ────────\n > \n ────────\n agent main | session main | openai/gpt | think medium | tokens 1k/200k")
+        };
+        for idle in ["gateway connected | idle", "local ready | idle"] {
+            assert_eq!(
+                explain(Agent::OpenClaw, &screen(idle)).state,
+                AgentState::Idle
+            );
+            assert!(explain(Agent::OpenClaw, &screen(idle)).visible_idle);
+        }
+        for busy in [
+            "⠋ running • 12s | gateway connected",
+            "⠙ streaming • 3s | local ready",
+            "⠹ sending • 1s | gateway connected",
+            "⠸ finishing context • 40s | gateway connected",
+        ] {
+            assert_eq!(
+                explain(Agent::OpenClaw, &screen(busy)).state,
+                AgentState::Working,
+                "{busy}"
+            );
+        }
+        assert_eq!(
+            explain(
+                Agent::OpenClaw,
+                &screen("gateway disconnected: closed | error")
+            )
+            .state,
+            AgentState::Idle
+        );
+    });
+}

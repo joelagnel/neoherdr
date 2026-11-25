@@ -1,0 +1,26 @@
+id = "openclaw"
+version = "2026.11.25.1"
+min_engine_version = 1
+updated_at = "2026-11-25T00:00:00Z"
+
+# OpenClaw's TUI keeps one status line above the editor, "<connection> | <activity>"
+# when idle ("gateway connected | idle", "local ready | idle") and, while a run is
+# active, a spinner loader "<activity> • <elapsed> | <connection>" where activity is
+# sending, waiting, streaming, running or finishing context. The footer under the
+# editor is a separate line, so only the bottom few lines are searched.
+
+[[rules]]
+id = "status_busy"
+state = "working"
+priority = 900
+region = "bottom_non_empty_lines(8)"
+visible_working = true
+line_regex = ['(sending|waiting|streaming|running|finishing context) \x{2022} \d+(s|m|h|\d)']
+
+[[rules]]
+id = "status_idle"
+state = "idle"
+priority = 850
+region = "bottom_non_empty_lines(8)"
+visible_idle = true
+line_regex = ['\| idle\s*$']
